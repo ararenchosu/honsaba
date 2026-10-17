@@ -2,19 +2,17 @@ import discord
 from discord import app_commands
 import random
 import os
-import traceback
 from datetime import datetime, timedelta, timezone
 from core.common import is_owner
 
 JST = timezone(timedelta(hours=9))
-# ✅ 既存のポイントファイル名に合わせる（環境に応じて変更してください）
 DATA_FILE = "kn_points_data.json"
-MINES_CATEGORY_ID = 1558467161146663023  # チャンネルを作るカテゴリID（任意）
+# ✅ 指定されたカテゴリIDを直接設定
+MINES_CATEGORY_ID = 1558467161146663023
 
-# ===== ポイント読み書き（エラー処理強化）=====
+# ===== ポイント読み書き =====
 def load_points_all():
     if not os.path.exists(DATA_FILE):
-        print(f"ℹ️ ファイルが存在しません、新規作成: {DATA_FILE}")
         return {"points": {}}
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -23,8 +21,7 @@ def load_points_all():
             if "points" not in data:
                 data["points"] = {}
             return data
-    except Exception as e:
-        print(f"❌ ポイント読み込みエラー: {e}")
+    except Exception:
         return {"points": {}}
 
 def save_points_all(data):
@@ -32,8 +29,8 @@ def save_points_all(data):
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             import json
             json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"❌ ポイント保存エラー: {e}")
+    except Exception:
+        pass
 
 def get_point_value(user_id):
     return load_points_all()["points"].get(str(user_id), 0)
@@ -111,15 +108,21 @@ class MinesGame:
         return e
 
 async def create_game_channel(guild: discord.Guild, user: discord.User):
-    category = guild.get_channel(MINES_CATEGORY_ID) if MINES_CATEGORY_ID else None
+    # ✅ 指定されたカテゴリを取得
+    category = guild.get_channel(MINES_CATEGORY_ID)
+    if not category:
+        raise ValueError(f"カテゴリが見つかりません: {MINES_CATEGORY_ID}")
+    
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         user: discord.PermissionOverwrite(read_messages=True, send_messages=False),
         guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
     }
+    # 管理者は見れるように
     for m in guild.members:
         if m.guild_permissions.administrator:
             overwrites[m] = discord.PermissionOverwrite(read_messages=True)
+    
     channel = await guild.create_text_channel(
         name=f"マインズ-{user.name}",
         category=category,
@@ -226,9 +229,8 @@ class MinesResultView(discord.ui.View):
                 channel = await create_game_channel(inter.guild, inter.user)
                 channel_map[uid] = channel
             except Exception as e:
-                print(f"❌ チャンネル作成エラー: {e}")
                 return await inter.response.send_message(
-                    f"❌ チャンネル作成に失敗しました\n{e}", ephemeral=True)
+                    f"❌ チャンネル作成失敗：{e}", ephemeral=True)
         
         new_game = MinesGame(inter.user, setting["bombs"], setting["bet"])
         new_game.channel = channel
@@ -335,12 +337,8 @@ async def start_game(user, guild, bombs, bet):
     uid = user.id
     channel = channel_map.get(uid)
     if not channel:
-        try:
-            channel = await create_game_channel(guild, user)
-            channel_map[uid] = channel
-        except Exception as e:
-            print(f"❌ チャンネル作成エラー: {e}")
-            raise e
+        channel = await create_game_channel(guild, user)
+        channel_map[uid] = channel
     
     game = MinesGame(user, bombs, bet)
     game.channel = channel
