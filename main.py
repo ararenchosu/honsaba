@@ -181,7 +181,7 @@ async def on_ready():
         if all_ok_main:
             print("✅ メインBot 全View 永続登録完了 ✨")
         else:
-            print("⚠️ メインBot：上記の❌ を修正して再起動してくださ")
+            print("⚠️ メインBot：上記の❌ を修正して再起動してください")
 
     except Exception as e:
         print(f"❌ メインBot View登録エラー: {e}")
@@ -212,10 +212,16 @@ async def on_ready():
     await voice_panel.setup(tree_main, bot_main); print("  ✅ voice_panel")
     await ranking_panel.setup(tree_main, bot_main); print("  ✅ ranking_panel")
     await elevator_panel.setup(tree_main, bot_main); print("  ✅ elevator_panel")
-    await mines_panel.setup(tree_main, bot_main); print("  ✅ mines_panel")
+
+    # ✅ mines_panel：エラーがあってもスキップして次へ進む
+    try:
+        await mines_panel.setup(tree_main, bot_main)
+        print("  ✅ mines_panel")
+    except Exception as e:
+        print(f"  ⚠️ mines_panel エラー（スキップ）: {e}")
 
     # ==============================================
-    # ✅ マインスコマンド：絶対にここで登録
+    # ✅ マインスコマンド：絶対に登録
     # ==============================================
     @tree_main.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")
     async def mine_panel_cmd(inter: discord.Interaction):
