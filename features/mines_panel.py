@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 from core.common import is_owner
 JST = timezone(timedelta(hours=9))
 
-# ========== ポイント読み書き ==========
 DATA_FILE = "kn_points_data.json"
+
 def load_points_all():
     import json, os
     if not os.path.exists(DATA_FILE):
@@ -16,12 +16,15 @@ def load_points_all():
         if "points" not in data:
             return {"points": data}
         return data
+
 def save_points_all(data):
     import json
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
 def get_point_value(user_id):
     return load_points_all()["points"].get(str(user_id), 0)
+
 def add_point_value(user_id, amount):
     data = load_points_all()
     uid = str(user_id)
@@ -29,15 +32,16 @@ def add_point_value(user_id, amount):
     save_points_all(data)
     return data["points"][uid]
 
-# ========== 倍率固定値 ==========
 FINAL_MULTIPLIER = {
     1: 11.2, 2: 13.0, 3: 15.7, 4: 21.45, 5: 32.9, 6: 45.85, 7: 64.15, 8: 96.3,
     9: 145.5, 10: 201.75, 11: 341.25, 12: 492.3, 13: 852.5, 14: 1520.0,
     15: 2805.0, 16: 5545.0, 17: 11730.0, 18: 26540.0, 19: 66350.0, 20: 182400.0,
     21: 570000.0, 22: 2090000.0, 23: 10150000.0, 24: 126500000.0,
 }
+
 def format_mul(val):
     return f"{val:,}倍" if val >= 1000 else f"{val}倍"
+
 def calc_step_multiplier(bombs: int, opened: int):
     safe = 25 - bombs
     if opened >= safe:
@@ -45,8 +49,10 @@ def calc_step_multiplier(bombs: int, opened: int):
     ratio = opened / safe
     return round(1.0 + (FINAL_MULTIPLIER[bombs] - 1.0) * ratio ** 1.5, 2)
 
-# ========== ゲーム本体 ==========
+# ========== ゲーム管理（ユーザーIDで一意に） ==========
 active_games = {}
+user_bomb_selection = {}  # {user_id: {"page": 0, "selected": None}}
+
 class MinesGameView(discord.ui.View):
     def __init__(self, user_id: int, bombs: int, bet: int):
         super().__init__(timeout=None)
@@ -99,6 +105,8 @@ class MinesGameView(discord.ui.View):
         if self.grid[idx]:
             self.game_over = True
             add_point_value(self.user_id, -self.bet)
+            if self.user_id in active_games:
+                del active_games[self.user_id]
             e = discord.Embed(title="💣 爆弾！",
                 description=f"🔹 賭け：{self.bet:,}pt\n🔹 結果：-{self.bet:,}pt",
                 color=0xE74C3C)
@@ -116,18 +124,22 @@ class MinesGameView(discord.ui.View):
         self.game_over = True
         win = int(self.bet * self.multiplier)
         add_point_value(self.user_id, win)
+        if self.user_id in active_games:
+            del active_games[self.user_id]
         e = discord.Embed(title="💰 回収完了！",
             description=f"🔹 賭け：{self.bet:,}pt\n🔹 倍率：{self.multiplier}倍\n🔹 獲得：+{win:,}pt",
             color=0x2ECC71)
         await inter.response.edit_message(embed=e, view=None)
 
-# ========== 爆弾数選択 ==========
 BOMBS_PER_PAGE = 8
+
 class BombsSelectView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, user_id: int):
         super().__init__(timeout=None)
-        self.page = 0
-        self.selected = None
+        self.user_id = user_id
+        state = user_bomb_selection.get(user_id, {"page": 0, "selected": None})
+        self.page = state["page"]
+        self.selected = state["selected"]
         self._render()
 
     def _render(self):
@@ -135,28 +147,28 @@ class BombsSelectView(discord.ui.View):
         start = self.page * BOMBS_PER_PAGE + 1
         end = min(24, start + BOMBS_PER_PAGE - 1)
         for n in range(start, end + 1):
-            style = discord.ButtonStyle.secondary if self.selected == n else discord.ButtonStyle.grey
+            style = discord.ButtonStyle.primary if self.selected == n else discord.ButtonStyle.secondary
             self.add_item(discord.ui.Button(
                 label=str(n), style=style,
-                custom_id=f"mine:bomb_sel:{n}"
+                custom_id=f"mine:bomb_sel:{self.user_id}:{n}"
             ))
         prev_d = self.page == 0
         next_d = end >= 24
         self.add_item(discord.ui.Button(
-            label="◀ 前", style=discord.ButtonStyle.grey, disabled=prev_d,
-            custom_id="mine:bomb_prev", row=4
+            label="◀ 前", style=discord.ButtonStyle.secondary, disabled=prev_d,
+            custom_id=f"mine:bomb_prev:{self.user_id}", row=4
         ))
         self.add_item(discord.ui.Button(
             label=f"{self.page+1}/3", style=discord.ButtonStyle.secondary, disabled=True,
             custom_id="mine:bomb_page_info", row=4
         ))
         self.add_item(discord.ui.Button(
-            label="次 ▶", style=discord.ButtonStyle.grey, disabled=next_d,
-            custom_id="mine:bomb_next", row=4
+            label="次 ▶", style=discord.ButtonStyle.secondary, disabled=next_d,
+            custom_id=f"mine:bomb_next:{self.user_id}", row=4
         ))
         self.add_item(discord.ui.Button(
             label="✅ 決定する", style=discord.ButtonStyle.primary,
-            custom_id="mine:bomb_confirm", row=4
+            custom_id=f"mine:bomb_confirm:{self.user_id}", row=4
         ))
 
     def embed(self):
@@ -169,28 +181,33 @@ class BombsSelectView(discord.ui.View):
             e.add_field(name="選択中", value=f"**{self.selected}個**", inline=False)
         return e
 
-# ========== スタートパネル ==========
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.success, row=0, custom_id="mine:panel_easy")
     async def easy(self, inter, btn):
-        await self._bet_modal(inter, 3)
+        await self._start_game(inter, 3)
 
     @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.secondary, row=0, custom_id="mine:panel_normal")
     async def normal(self, inter, btn):
-        await self._bet_modal(inter, 5)
+        await self._start_game(inter, 5)
 
     @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.danger, row=1, custom_id="mine:panel_hard")
     async def hard(self, inter, btn):
-        await self._bet_modal(inter, 8)
+        await self._start_game(inter, 8)
 
     @discord.ui.button(label="⚙️ 自分で設定 [1～24個]", style=discord.ButtonStyle.primary, row=1, custom_id="mine:panel_custom")
     async def custom(self, inter, btn):
-        await inter.response.send_message(embed=BombsSelectView().embed(), view=BombsSelectView(), ephemeral=True)
+        uid = inter.user.id
+        user_bomb_selection[uid] = {"page": 0, "selected": None}
+        view = BombsSelectView(uid)
+        await inter.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
-    async def _bet_modal(self, inter, bombs):
+    async def _start_game(self, inter, bombs):
+        uid = inter.user.id
+        if uid in active_games:
+            return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
         mul = format_mul(FINAL_MULTIPLIER[bombs])
         class BetModal(discord.ui.Modal(title="💎 マインス - 賭け額入力")):
             bet_in = discord.ui.TextInput(label=f"爆弾{bombs}個 最終倍率：{mul}\n賭けるポイント", required=True)
@@ -207,15 +224,13 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message(embed=game.embed(), view=game, ephemeral=True)
         await inter.response.send_modal(BetModal())
 
-# ========== セットアップ ==========
 async def setup(tree, bot):
     if not hasattr(bot, "_mines_views_ready"):
         bot.add_view(MinesStartPanelView())
-        bot.add_view(BombsSelectView())
+        bot.add_view(BombsSelectView(0))
         bot._mines_views_ready = True
         print("✅ mines_panel 永久View登録完了")
 
-    # ✅ 指定されたサーバーIDで即時反映
     GUILD_ID = 1542788841465978880
 
     @tree.command(
@@ -241,51 +256,53 @@ async def setup(tree, bot):
         if not inter.data or "custom_id" not in inter.data:
             return
         cid = inter.data["custom_id"]
+        parts = cid.split(":")
 
         if cid.startswith("mine:bomb_sel:"):
-            num = int(cid.split(":")[-1])
-            view = BombsSelectView()
-            if inter.message.components:
-                for comp in inter.message.components:
-                    for btn in comp.children:
-                        if hasattr(btn, "label") and isinstance(btn.label, str) and "/" in btn.label:
-                            try:
-                                view.page = int(btn.label.split("/")[0]) - 1
-                            except: pass
-            view.selected = num
+            _, _, uid_str, num_str = parts
+            uid = int(uid_str)
+            if inter.user.id != uid:
+                return await inter.response.defer()
+            num = int(num_str)
+            if uid not in user_bomb_selection:
+                user_bomb_selection[uid] = {"page": 0, "selected": None}
+            user_bomb_selection[uid]["selected"] = num
+            view = BombsSelectView(uid)
             await inter.response.edit_message(embed=view.embed(), view=view)
 
-        elif cid == "mine:bomb_prev":
-            view = BombsSelectView()
-            if inter.message.components:
-                for comp in inter.message.components:
-                    for btn in comp.children:
-                        if hasattr(btn, "label") and isinstance(btn.label, str) and "/" in btn.label:
-                            try:
-                                view.page = max(0, int(btn.label.split("/")[0]) - 2)
-                            except: pass
+        elif cid.startswith("mine:bomb_prev:"):
+            _, _, uid_str = parts
+            uid = int(uid_str)
+            if inter.user.id != uid:
+                return await inter.response.defer()
+            if uid not in user_bomb_selection:
+                user_bomb_selection[uid] = {"page": 1, "selected": None}
+            user_bomb_selection[uid]["page"] = max(0, user_bomb_selection[uid]["page"] - 1)
+            view = BombsSelectView(uid)
             await inter.response.edit_message(embed=view.embed(), view=view)
 
-        elif cid == "mine:bomb_next":
-            view = BombsSelectView()
-            if inter.message.components:
-                for comp in inter.message.components:
-                    for btn in comp.children:
-                        if hasattr(btn, "label") and isinstance(btn.label, str) and "/" in btn.label:
-                            try:
-                                view.page = min(2, int(btn.label.split("/")[0]))
-                            except: pass
+        elif cid.startswith("mine:bomb_next:"):
+            _, _, uid_str = parts
+            uid = int(uid_str)
+            if inter.user.id != uid:
+                return await inter.response.defer()
+            if uid not in user_bomb_selection:
+                user_bomb_selection[uid] = {"page": -1, "selected": None}
+            user_bomb_selection[uid]["page"] = min(2, user_bomb_selection[uid]["page"] + 1)
+            view = BombsSelectView(uid)
             await inter.response.edit_message(embed=view.embed(), view=view)
 
-        elif cid == "mine:bomb_confirm":
-            selected = None
-            for comp in inter.message.components:
-                for btn in comp.children:
-                    if getattr(btn, "style", None) == discord.ButtonStyle.secondary and getattr(btn, "label", "").isdigit():
-                        selected = int(btn.label)
-                        break
+        elif cid.startswith("mine:bomb_confirm:"):
+            _, _, uid_str = parts
+            uid = int(uid_str)
+            if inter.user.id != uid:
+                return await inter.response.defer()
+            state = user_bomb_selection.get(uid, {})
+            selected = state.get("selected")
             if not selected:
                 return await inter.response.send_message("❌ 爆弾数を選択してください", ephemeral=True)
+            if uid in active_games:
+                return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
             mul = format_mul(FINAL_MULTIPLIER[selected])
             class CustomModal(discord.ui.Modal(title="💎 マインス - 賭け額入力")):
                 bet_in = discord.ui.TextInput(label=f"爆弾{selected}個 最終倍率：{mul}\n賭けるポイント", required=True)
@@ -303,19 +320,21 @@ async def setup(tree, bot):
             await inter.response.send_modal(CustomModal())
 
         elif cid.startswith("mine:cell:"):
-            _, _, uid, idx = cid.split(":")
-            if int(uid) != inter.user.id:
+            _, _, uid_str, idx_str = parts
+            uid = int(uid_str)
+            if inter.user.id != uid:
                 return await inter.response.defer()
-            game = active_games.get(inter.user.id)
+            game = active_games.get(uid)
             if not game or game.game_over:
                 return await inter.response.defer()
-            await game.open_cell(inter, int(idx))
+            await game.open_cell(inter, int(idx_str))
 
         elif cid.startswith("mine:cash:"):
-            _, _, uid = cid.split(":")
-            if int(uid) != inter.user.id:
+            _, _, uid_str = parts
+            uid = int(uid_str)
+            if inter.user.id != uid:
                 return await inter.response.defer()
-            game = active_games.get(inter.user.id)
+            game = active_games.get(uid)
             if not game or game.game_over:
                 return await inter.response.defer()
             await game.cash_out(inter)
