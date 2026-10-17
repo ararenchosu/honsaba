@@ -50,7 +50,8 @@ def calc_step_multiplier(bombs: int, opened: int):
 
 game_states = {}       # {user_id: game_object} → 結果確定後に削除
 last_settings = {}     # {user_id: {bombs, bet}} → 結果後も保持
-temp_channels = {}
+channel_map = {}       # {user_id: channel} → 同じチャンネル再利用用
+message_map = {}       # {user_id: message} → メッセージ上書き用
 
 class MinesGame:
     def __init__(self, user: discord.User, bombs: int, bet: int):
@@ -202,32 +203,61 @@ class MinesResultView(discord.ui.View):
     async def on_retry(self, inter):
         if inter.user.id != self.game.user_id:
             return await inter.response.defer()
-        # ✅ 結果後は game_states にないので即座に開始可能
-        setting = last_settings.get(self.game.user_id)
+        
+        uid = self.game.user_id
+        
+        # ✅ 進行中チェック
+        if uid in game_states:
+            return await inter.response.send_message("❌ ゲーム進行中です！", ephemeral=True)
+        
+        setting = last_settings.get(uid)
         if not setting:
             return await inter.response.send_message("❌ 設定が見つかりません", ephemeral=True)
-        bal = get_point_value(self.game.user_id)
+        
+        bal = get_point_value(uid)
         if setting["bet"] > bal:
             return await inter.response.send_message(
                 f"❌ ポイントが足りません\n賭け額：{setting['bet']:,}pt\n保有：{bal:,}pt",
                 ephemeral=True
             )
         
-        channel = await create_game_channel(inter.guild, inter.user)
+        # ✅ 既存のチャンネルを再利用 → 新規作成しない
+        channel = channel_map.get(uid)
+        if not channel:
+            # 万が一チャンネルが消えていた場合のみ新規作成
+            channel = await create_game_channel(inter.guild, inter.user)
+            channel_map[uid] = channel
+        
+        # ✅ 完全に新しいゲームを作成
         new_game = MinesGame(inter.user, setting["bombs"], setting["bet"])
         new_game.channel = channel
-        game_states[self.game.user_id] = new_game
-        temp_channels[self.game.user_id] = channel
+        game_states[uid] = new_game
         
-        view = MinesPlayingView(new_game)
-        msg = await channel.send(embed=new_game.playing_embed(), view=view)
-        new_game.message = msg
-        await inter.response.send_message(f"✅ 新規ゲーム開始 → {channel.mention}", ephemeral=True)
+        # ✅ 前のメッセージを編集して新しい盤面に置き換え
+        old_msg = message_map.get(uid)
+        new_view = MinesPlayingView(new_game)
+        
+        if old_msg:
+            # メッセージを上書き → 新しいゲーム画面に入れ替え
+            await old_msg.edit(embed=new_game.playing_embed(), view=new_view)
+            new_game.message = old_msg
+            message_map[uid] = old_msg
+            await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
+        else:
+            # メッセージがない場合は新規送信
+            new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
+            new_game.message = new_msg
+            message_map[uid] = new_msg
+            await inter.response.send_message(f"✅ ゲーム開始 → {channel.mention}", ephemeral=True)
 
     async def on_close(self, inter):
         if inter.user.id != self.game.user_id and not inter.user.guild_permissions.administrator:
             return await inter.response.defer()
-        c = temp_channels.pop(self.game.user_id, None)
+        uid = self.game.user_id
+        c = channel_map.pop(uid, None)
+        message_map.pop(uid, None)
+        game_states.pop(uid, None)
+        last_settings.pop(uid, None)
         if c:
             await c.delete(reason="ゲーム終了")
         await inter.response.send_message("✅ チャンネルを閉じました", ephemeral=True)
@@ -317,14 +347,21 @@ class MinesStartPanelView(discord.ui.View):
         await inter.response.send_modal(BetModal())
 
 async def start_game(user, guild, bombs, bet):
-    channel = await create_game_channel(guild, user)
+    uid = user.id
+    # ✅ 初回はチャンネル作成、再利用可能に保存
+    channel = channel_map.get(uid)
+    if not channel:
+        channel = await create_game_channel(guild, user)
+        channel_map[uid] = channel
+    
     game = MinesGame(user, bombs, bet)
     game.channel = channel
-    game_states[user.id] = game
-    temp_channels[user.id] = channel
+    game_states[uid] = game
+    
     view = MinesPlayingView(game)
     msg = await channel.send(embed=game.playing_embed(), view=view)
     game.message = msg
+    message_map[uid] = msg
 
 async def setup(tree, bot):
     pass
