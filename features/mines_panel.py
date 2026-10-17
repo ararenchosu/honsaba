@@ -2,24 +2,38 @@ import discord
 from discord import app_commands
 import random
 import os
+import traceback
 from datetime import datetime, timedelta, timezone
 from core.common import is_owner
 
 JST = timezone(timedelta(hours=9))
+# ✅ 既存のポイントファイル名に合わせる（環境に応じて変更してください）
 DATA_FILE = "kn_points_data.json"
-MINES_CATEGORY_ID = 1558467161146663023  # 特定のカテゴリにまとめたい場合はIDを入れる
+MINES_CATEGORY_ID = 1558467161146663023  # チャンネルを作るカテゴリID（任意）
 
+# ===== ポイント読み書き（エラー処理強化）=====
 def load_points_all():
     if not os.path.exists(DATA_FILE):
+        print(f"ℹ️ ファイルが存在しません、新規作成: {DATA_FILE}")
         return {"points": {}}
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        import json
-        return json.load(f)
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            import json
+            data = json.load(f)
+            if "points" not in data:
+                data["points"] = {}
+            return data
+    except Exception as e:
+        print(f"❌ ポイント読み込みエラー: {e}")
+        return {"points": {}}
 
 def save_points_all(data):
-    import json
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            import json
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"❌ ポイント保存エラー: {e}")
 
 def get_point_value(user_id):
     return load_points_all()["points"].get(str(user_id), 0)
@@ -48,10 +62,10 @@ def calc_step_multiplier(bombs: int, opened: int):
     ratio = opened / safe
     return round(1.0 + (FINAL_MULTIPLIER[bombs] - 1.0) * ratio ** 1.5, 2)
 
-game_states = {}       # {user_id: game_object} → 結果確定後に削除
-last_settings = {}     # {user_id: {bombs, bet}} → 結果後も保持
-channel_map = {}       # {user_id: channel} → 同じチャンネル再利用用
-message_map = {}       # {user_id: message} → メッセージ上書き用
+game_states = {}
+last_settings = {}
+channel_map = {}
+message_map = {}
 
 class MinesGame:
     def __init__(self, user: discord.User, bombs: int, bet: int):
@@ -114,7 +128,6 @@ async def create_game_channel(guild: discord.Guild, user: discord.User):
     )
     return channel
 
-# ========== ゲーム中View ==========
 class MinesPlayingView(discord.ui.View):
     def __init__(self, game: MinesGame):
         super().__init__(timeout=None)
@@ -124,8 +137,6 @@ class MinesPlayingView(discord.ui.View):
     def _build_buttons(self):
         self.clear_items()
         g = self.game
-        
-        # 5×5 盤面ボタン
         for idx in range(25):
             if g.opened[idx]:
                 lbl = "💣" if g.grid[idx] else "💎"
@@ -139,7 +150,6 @@ class MinesPlayingView(discord.ui.View):
             btn.callback = lambda i, idx=idx: self.on_click(i, idx)
             self.add_item(btn)
         
-        # ✅ 常に表示：倍率が1倍超過（=1つ以上開けた）場合に押せる
         can_end = g.opened_count > 0
         end_btn = discord.ui.Button(
             label="💰 この倍率で終了",
@@ -157,23 +167,15 @@ class MinesPlayingView(discord.ui.View):
         g = self.game
         if g.game_over or g.opened[idx]:
             return await inter.response.defer()
-
         g.opened[idx] = True
-
         if g.grid[idx]:
-            # 💣 爆弾 → 終了判定 & 状態削除
             g.game_over = True
             add_point_value(g.user_id, -g.bet)
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
             game_states.pop(g.user_id, None)
-            embed = g.result_embed(
-                "💣 爆弾！",
-                f"🔹 賭け：{g.bet:,}pt\n🔹 結果：-{g.bet:,}pt",
-                0xE74C3C
-            )
+            embed = g.result_embed("💣 爆弾！", f"🔹 賭け：{g.bet:,}pt\n🔹 結果：-{g.bet:,}pt", 0xE74C3C)
             await inter.response.edit_message(embed=embed, view=MinesResultView(g))
         else:
-            # 💎 当たり → ボタン状態更新
             g.opened_count += 1
             g.multiplier = calc_step_multiplier(g.bombs, g.opened_count)
             await inter.response.edit_message(embed=g.playing_embed(), view=MinesPlayingView(g))
@@ -182,22 +184,15 @@ class MinesPlayingView(discord.ui.View):
         g = self.game
         if g.game_over or g.opened_count == 0:
             return await inter.response.defer()
-        
-        # 💰 現在の倍率で確定
         g.game_over = True
         win = int(g.bet * g.multiplier)
         add_point_value(g.user_id, win)
         last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
         game_states.pop(g.user_id, None)
-        
-        embed = g.result_embed(
-            "💰 回収完了！",
-            f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{g.multiplier}倍\n🔹 獲得：+{win:,}pt",
-            0x2ECC71
-        )
+        embed = g.result_embed("💰 回収完了！",
+            f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{g.multiplier}倍\n🔹 獲得：+{win:,}pt", 0x2ECC71)
         await inter.response.edit_message(embed=embed, view=MinesResultView(g))
 
-# ========== 結果View ==========
 class MinesResultView(discord.ui.View):
     def __init__(self, game: MinesGame):
         super().__init__(timeout=None)
@@ -214,35 +209,32 @@ class MinesResultView(discord.ui.View):
     async def on_retry(self, inter):
         if inter.user.id != self.game.user_id:
             return await inter.response.defer()
-        
         uid = self.game.user_id
-        
         if uid in game_states:
             return await inter.response.send_message("❌ ゲーム進行中です！", ephemeral=True)
-        
         setting = last_settings.get(uid)
         if not setting:
             return await inter.response.send_message("❌ 設定が見つかりません", ephemeral=True)
-        
         bal = get_point_value(uid)
         if setting["bet"] > bal:
             return await inter.response.send_message(
-                f"❌ ポイントが足りません\n賭け額：{setting['bet']:,}pt\n保有：{bal:,}pt",
-                ephemeral=True
-            )
+                f"❌ ポイントが足りません\n賭け額：{setting['bet']:,}pt\n保有：{bal:,}pt", ephemeral=True)
         
         channel = channel_map.get(uid)
         if not channel:
-            channel = await create_game_channel(inter.guild, inter.user)
-            channel_map[uid] = channel
+            try:
+                channel = await create_game_channel(inter.guild, inter.user)
+                channel_map[uid] = channel
+            except Exception as e:
+                print(f"❌ チャンネル作成エラー: {e}")
+                return await inter.response.send_message(
+                    f"❌ チャンネル作成に失敗しました\n{e}", ephemeral=True)
         
         new_game = MinesGame(inter.user, setting["bombs"], setting["bet"])
         new_game.channel = channel
         game_states[uid] = new_game
-        
         new_view = MinesPlayingView(new_game)
         old_msg = message_map.get(uid)
-        
         if old_msg:
             await old_msg.edit(embed=new_game.playing_embed(), view=new_view)
             new_game.message = old_msg
@@ -266,7 +258,6 @@ class MinesResultView(discord.ui.View):
             await c.delete(reason="ゲーム終了")
         await inter.response.send_message("✅ チャンネルを閉じました", ephemeral=True)
 
-# ========== スタート用パネル ==========
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -288,9 +279,7 @@ class MinesStartPanelView(discord.ui.View):
         uid = inter.user.id
         if uid in game_states:
             return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
-        
         bal = get_point_value(uid)
-        
         class BetInputModal(discord.ui.Modal, title="💎 自分で設定"):
             bet_in = discord.ui.TextInput(
                 label=f"賭けるポイント（保有：{bal:,}pt）",
@@ -310,26 +299,20 @@ class MinesStartPanelView(discord.ui.View):
                     return await m.response.send_message("❌ 数字を入力してください", ephemeral=True)
                 if bet_val <= 0 or bet_val > bal:
                     return await m.response.send_message(
-                        f"❌ ポイントが足りません\n保有：{bal:,}pt", ephemeral=True
-                    )
+                        f"❌ ポイントが足りません\n保有：{bal:,}pt", ephemeral=True)
                 if bomb_val < 1 or bomb_val > 24:
                     return await m.response.send_message(
-                        "❌ 爆弾の数は1～24で指定してください", ephemeral=True
-                    )
-                
+                        "❌ 爆弾の数は1～24で指定してください", ephemeral=True)
                 await start_game(m.user, m.guild, bomb_val, bet_val)
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
-        
         await inter.response.send_modal(BetInputModal())
 
     async def _start_fixed(self, inter, bombs):
         uid = inter.user.id
         if uid in game_states:
             return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
-        
         mul = format_mul(FINAL_MULTIPLIER[bombs])
         bal = get_point_value(uid)
-        
         class BetModal(discord.ui.Modal, title=f"💎 爆弾{bombs}個"):
             bet_in = discord.ui.TextInput(
                 label=f"倍率：{mul}\n賭けるポイント",
@@ -343,24 +326,25 @@ class MinesStartPanelView(discord.ui.View):
                     return await m.response.send_message("❌ 数字を入力してください", ephemeral=True)
                 if val <= 0 or val > bal:
                     return await m.response.send_message(
-                        f"❌ ポイントが足りません\n保有：{bal:,}pt", ephemeral=True
-                    )
+                        f"❌ ポイントが足りません\n保有：{bal:,}pt", ephemeral=True)
                 await start_game(m.user, m.guild, bombs, val)
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
-        
         await inter.response.send_modal(BetModal())
 
 async def start_game(user, guild, bombs, bet):
     uid = user.id
     channel = channel_map.get(uid)
     if not channel:
-        channel = await create_game_channel(guild, user)
-        channel_map[uid] = channel
+        try:
+            channel = await create_game_channel(guild, user)
+            channel_map[uid] = channel
+        except Exception as e:
+            print(f"❌ チャンネル作成エラー: {e}")
+            raise e
     
     game = MinesGame(user, bombs, bet)
     game.channel = channel
     game_states[uid] = game
-    
     view = MinesPlayingView(game)
     msg = await channel.send(embed=game.playing_embed(), view=view)
     game.message = msg
