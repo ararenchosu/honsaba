@@ -35,21 +35,27 @@ def set_points(user_id: int, amount: int):
     data[str(user_id)] = amount
     save_data(data)
 
-# ========== ユーザー選択View（修正版） ==========
+# ========== ユーザー選択View（旧バージョン対応） ==========
 class SelectUserView(discord.ui.View):
     def __init__(self, callback):
         super().__init__(timeout=120)
         self._callback = callback
+        self.selected_user = None
+        # UserSelect を直接使う
+        self.add_item(
+            discord.ui.UserSelect(
+                placeholder="ユーザーを選択してください",
+                min_values=1,
+                max_values=1,
+                custom_id="point_admin:select_user"
+            )
+        )
 
-    @discord.ui.user_select(
-        placeholder="ユーザーを選択してください",
-        min_values=1,
-        max_values=1,
-        custom_id="point_admin:select_user"
-    )
-    async def select_user(self, inter: discord.Interaction, user: discord.User):
-        await self._callback(inter, user)
+    async def interaction_check(self, inter: discord.Interaction) -> bool:
+        self.selected_user = self.children[0].values[0]
+        await self._callback(inter, self.selected_user)
         self.stop()
+        return True
 
 # ========== 管理パネル ==========
 class PointAdminView(discord.ui.View):
