@@ -3,12 +3,10 @@ from discord import app_commands
 import random
 from datetime import datetime, timedelta, timezone
 from core.common import is_owner
-
 JST = timezone(timedelta(hours=9))
 
 # ========== ポイント読み書き ==========
 DATA_FILE = "kn_points_data.json"
-
 def load_points_all():
     import json, os
     if not os.path.exists(DATA_FILE):
@@ -18,15 +16,12 @@ def load_points_all():
         if "points" not in data:
             return {"points": data}
         return data
-
 def save_points_all(data):
     import json
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
 def get_point_value(user_id):
     return load_points_all()["points"].get(str(user_id), 0)
-
 def add_point_value(user_id, amount):
     data = load_points_all()
     uid = str(user_id)
@@ -41,10 +36,8 @@ FINAL_MULTIPLIER = {
     15: 2805.0, 16: 5545.0, 17: 11730.0, 18: 26540.0, 19: 66350.0, 20: 182400.0,
     21: 570000.0, 22: 2090000.0, 23: 10150000.0, 24: 126500000.0,
 }
-
 def format_mul(val):
     return f"{val:,}倍" if val >= 1000 else f"{val}倍"
-
 def calc_step_multiplier(bombs: int, opened: int):
     safe = 25 - bombs
     if opened >= safe:
@@ -54,7 +47,6 @@ def calc_step_multiplier(bombs: int, opened: int):
 
 # ========== ゲーム本体 ==========
 active_games = {}
-
 class MinesGameView(discord.ui.View):
     def __init__(self, user_id: int, bombs: int, bet: int):
         super().__init__(timeout=None)
@@ -86,8 +78,9 @@ class MinesGameView(discord.ui.View):
                 custom_id=f"mine:cell:{self.user_id}:{idx}"
             ))
         if not self.game_over and self.opened_count > 0:
+            # ✅ row=4 に修正
             self.add_item(discord.ui.Button(
-                label="💰 回収", style=discord.ButtonStyle.primary, row=5,
+                label="💰 回収", style=discord.ButtonStyle.primary, row=4,
                 custom_id=f"mine:cash:{self.user_id}"
             ))
 
@@ -131,10 +124,9 @@ class MinesGameView(discord.ui.View):
 
 # ========== 爆弾数選択（ページ式） ==========
 BOMBS_PER_PAGE = 8
-
 class BombsSelectView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # 永久
+        super().__init__(timeout=None)
         self.page = 0
         self.selected = None
         self._render()
@@ -150,10 +142,12 @@ class BombsSelectView(discord.ui.View):
             ))
         prev_d = self.page == 0
         next_d = end >= 24
-        self.add_item(discord.ui.Button(label="◀ 前", style=discord.ButtonStyle.grey, disabled=prev_d, custom_id="mine:bomb_prev"))
-        self.add_item(discord.ui.Button(label=f"{self.page+1}/3", style=discord.ButtonStyle.secondary, disabled=True))
-        self.add_item(discord.ui.Button(label="次 ▶", style=discord.ButtonStyle.grey, disabled=next_d, custom_id="mine:bomb_next"))
-        self.add_item(discord.ui.Button(label="✅ 決定する", style=discord.ButtonStyle.primary, row=5, custom_id="mine:bomb_confirm"))
+        # ✅ row=4 に統一
+        self.add_item(discord.ui.Button(label="◀ 前", style=discord.ButtonStyle.grey, disabled=prev_d, custom_id="mine:bomb_prev", row=4))
+        self.add_item(discord.ui.Button(label=f"{self.page+1}/3", style=discord.ButtonStyle.secondary, disabled=True, row=4))
+        self.add_item(discord.ui.Button(label="次 ▶", style=discord.ButtonStyle.grey, disabled=next_d, custom_id="mine:bomb_next", row=4))
+        # ✅ row=4 に修正
+        self.add_item(discord.ui.Button(label="✅ 決定する", style=discord.ButtonStyle.primary, row=4, custom_id="mine:bomb_confirm"))
 
     def embed(self):
         mul_text = "選択してください"
@@ -168,7 +162,7 @@ class BombsSelectView(discord.ui.View):
 # ========== スタートパネル（永久） ==========
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # 永久
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.success, row=0, custom_id="mine:panel_easy")
     async def easy(self, inter, btn):
@@ -205,14 +199,12 @@ class MinesStartPanelView(discord.ui.View):
 
 # ========== セットアップ ==========
 async def setup(tree, bot):
-    # 永久View登録
     if not hasattr(bot, "_mines_views_ready"):
         bot.add_view(MinesStartPanelView())
         bot.add_view(BombsSelectView())
         bot._mines_views_ready = True
         print("✅ mines_panel 永久View登録完了")
 
-    # パネル設置コマンド
     @tree.command(name="minesパネル設置", description="💎 マインス パネルを設置")
     @app_commands.check(is_owner)
     async def setup_panel(inter):
@@ -228,7 +220,6 @@ async def setup(tree, bot):
         )
         await inter.response.send_message(embed=e, view=MinesStartPanelView())
 
-    # インタラクション受付
     @bot.listen()
     async def on_interaction(inter):
         if not inter.data or "custom_id" not in inter.data:
@@ -238,7 +229,6 @@ async def setup(tree, bot):
         if cid.startswith("mine:bomb_sel:"):
             num = int(cid.split(":")[-1])
             view = BombsSelectView()
-            # ページ復元
             if inter.message.components:
                 for comp in inter.message.components:
                     for btn in comp.children:
