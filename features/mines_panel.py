@@ -225,18 +225,21 @@ class MinesStartPanelView(discord.ui.View):
         await inter.response.send_modal(BetModal())
 
 async def setup(tree: app_commands.CommandTree, bot=None):
-    # View 永続登録：1回だけ
-    if bot is not None and not hasattr(bot, "_mines_views_done"):
+    if bot is None:
+        return
+
+    # View 永続登録
+    if not hasattr(bot, "_mines_views_done"):
         bot.add_view(MinesStartPanelView())
         bot.add_view(BombsSelectView())
         bot._mines_views_done = True
         print("✅ mines_panel View登録完了")
 
-    # インタラクション処理：1回だけ
-    if bot is not None and not hasattr(bot, "_mines_interaction_done"):
+    # インタラクション処理：on_message で拾う
+    if not hasattr(bot, "_mines_interaction_done"):
         bot._mines_interaction_done = True
 
-        @bot.listen()
+        @bot.event
         async def on_interaction(inter):
             if not inter.data or "custom_id" not in inter.data:
                 return
@@ -324,5 +327,4 @@ async def setup(tree: app_commands.CommandTree, bot=None):
                     return await inter.response.defer()
                 await game.cash_out(inter)
 
-    # ✅ 絶対に戻る
     return
