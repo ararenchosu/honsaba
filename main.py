@@ -49,7 +49,6 @@ intents_main.message_content = True
 intents_main.members = True
 bot_main = discord.Client(intents=intents_main)
 tree_main = app_commands.CommandTree(bot_main)
-
 bot_main._ready_done = False
 
 def get_jst_now():
@@ -101,7 +100,6 @@ async def on_ready():
 
     print(f"\n========== メインBot 起動 ==========")
     print(f"✅ ログイン：{bot_main.user}")
-
     last_reason = get_and_clear_reason()
 
     def check_view_no_args(view_class, view_name: str):
@@ -133,7 +131,7 @@ async def on_ready():
         from features.backup_panel import BackupPanelView, RestoreConfirmView
         from features.command_list_panel import CommandListView
         from features.elevator_panel import ElevatorView
-        from features.mines_panel import MinesStartPanelView, BombsSelectView
+        from features.mines_panel import MinesStartPanelView
 
         views_to_register_main = [
             (LotteryPanelView, "LotteryPanelView"),
@@ -162,7 +160,6 @@ async def on_ready():
             (ranking_panel.RankingPanelView, "RankingPanelView"),
             (ElevatorView, "ElevatorView"),
             (MinesStartPanelView, "MinesStartPanelView"),
-            (BombsSelectView, "BombsSelectView"),
         ]
 
         for view_cls, name in views_to_register_main:
@@ -213,7 +210,6 @@ async def on_ready():
     await ranking_panel.setup(tree_main, bot_main); print("  ✅ ranking_panel")
     await elevator_panel.setup(tree_main, bot_main); print("  ✅ elevator_panel")
 
-    # ✅ mines_panel：エラーがあってもスキップして次へ進む
     try:
         await mines_panel.setup(tree_main, bot_main)
         print("  ✅ mines_panel")
@@ -280,7 +276,6 @@ if TOKEN_SUB:
     intents_sub.members = True
     bot_sub = discord.Client(intents=intents_sub)
     tree_sub = app_commands.CommandTree(bot_sub)
-
     bot_sub._ready_done = False
 
     @bot_sub.event
