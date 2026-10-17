@@ -124,6 +124,8 @@ class MinesPlayingView(discord.ui.View):
     def _build_buttons(self):
         self.clear_items()
         g = self.game
+        
+        # 5×5 盤面ボタン
         for idx in range(25):
             if g.opened[idx]:
                 lbl = "💣" if g.grid[idx] else "💎"
@@ -136,10 +138,17 @@ class MinesPlayingView(discord.ui.View):
             btn = discord.ui.Button(label=lbl, style=style, disabled=disabled, row=idx // 5)
             btn.callback = lambda i, idx=idx: self.on_click(i, idx)
             self.add_item(btn)
-        if g.opened_count > 0:
-            cash_btn = discord.ui.Button(label="💰 回収", style=discord.ButtonStyle.primary, row=4)
-            cash_btn.callback = self.on_cash
-            self.add_item(cash_btn)
+        
+        # ✅ 常に表示：倍率が1倍超過（=1つ以上開けた）場合に押せる
+        can_end = g.opened_count > 0
+        end_btn = discord.ui.Button(
+            label="💰 この倍率で終了",
+            style=discord.ButtonStyle.primary if can_end else discord.ButtonStyle.secondary,
+            disabled=not can_end,
+            row=4
+        )
+        end_btn.callback = self.on_end
+        self.add_item(end_btn)
 
     async def interaction_check(self, inter):
         return inter.user.id == self.game.user_id
@@ -156,7 +165,7 @@ class MinesPlayingView(discord.ui.View):
             g.game_over = True
             add_point_value(g.user_id, -g.bet)
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
-            game_states.pop(g.user_id, None)  # ✅ 進行中から削除
+            game_states.pop(g.user_id, None)
             embed = g.result_embed(
                 "💣 爆弾！",
                 f"🔹 賭け：{g.bet:,}pt\n🔹 結果：-{g.bet:,}pt",
@@ -164,24 +173,26 @@ class MinesPlayingView(discord.ui.View):
             )
             await inter.response.edit_message(embed=embed, view=MinesResultView(g))
         else:
-            # 💎 当たり
+            # 💎 当たり → ボタン状態更新
             g.opened_count += 1
             g.multiplier = calc_step_multiplier(g.bombs, g.opened_count)
-            await inter.response.edit_message(embed=g.playing_embed(), view=self)
+            await inter.response.edit_message(embed=g.playing_embed(), view=MinesPlayingView(g))
 
-    async def on_cash(self, inter):
+    async def on_end(self, inter):
         g = self.game
-        if g.game_over:
+        if g.game_over or g.opened_count == 0:
             return await inter.response.defer()
-        # 💰 回収 → 終了判定 & 状態削除
+        
+        # 💰 現在の倍率で確定
         g.game_over = True
         win = int(g.bet * g.multiplier)
         add_point_value(g.user_id, win)
         last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
-        game_states.pop(g.user_id, None)  # ✅ 進行中から削除
+        game_states.pop(g.user_id, None)
+        
         embed = g.result_embed(
             "💰 回収完了！",
-            f"🔹 賭け：{g.bet:,}pt\n🔹 倍率：{g.multiplier}倍\n🔹 獲得：+{win:,}pt",
+            f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{g.multiplier}倍\n🔹 獲得：+{win:,}pt",
             0x2ECC71
         )
         await inter.response.edit_message(embed=embed, view=MinesResultView(g))
@@ -206,7 +217,6 @@ class MinesResultView(discord.ui.View):
         
         uid = self.game.user_id
         
-        # ✅ 進行中チェック
         if uid in game_states:
             return await inter.response.send_message("❌ ゲーム進行中です！", ephemeral=True)
         
@@ -221,30 +231,24 @@ class MinesResultView(discord.ui.View):
                 ephemeral=True
             )
         
-        # ✅ 既存のチャンネルを再利用 → 新規作成しない
         channel = channel_map.get(uid)
         if not channel:
-            # 万が一チャンネルが消えていた場合のみ新規作成
             channel = await create_game_channel(inter.guild, inter.user)
             channel_map[uid] = channel
         
-        # ✅ 完全に新しいゲームを作成
         new_game = MinesGame(inter.user, setting["bombs"], setting["bet"])
         new_game.channel = channel
         game_states[uid] = new_game
         
-        # ✅ 前のメッセージを編集して新しい盤面に置き換え
-        old_msg = message_map.get(uid)
         new_view = MinesPlayingView(new_game)
+        old_msg = message_map.get(uid)
         
         if old_msg:
-            # メッセージを上書き → 新しいゲーム画面に入れ替え
             await old_msg.edit(embed=new_game.playing_embed(), view=new_view)
             new_game.message = old_msg
             message_map[uid] = old_msg
             await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
         else:
-            # メッセージがない場合は新規送信
             new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
             new_game.message = new_msg
             message_map[uid] = new_msg
@@ -348,7 +352,6 @@ class MinesStartPanelView(discord.ui.View):
 
 async def start_game(user, guild, bombs, bet):
     uid = user.id
-    # ✅ 初回はチャンネル作成、再利用可能に保存
     channel = channel_map.get(uid)
     if not channel:
         channel = await create_game_channel(guild, user)
