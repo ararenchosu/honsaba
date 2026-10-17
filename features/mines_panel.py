@@ -204,6 +204,28 @@ class MinesStartPanelView(discord.ui.View):
         view = BombsSelectView().render_for_user(uid)
         await inter.response.send_message(embed=view.embed_for_user(uid), view=view, ephemeral=True)
 
+    @discord.ui.button(label="💰 ポイント確認", style=discord.ButtonStyle.secondary, row=2, custom_id="mine:panel_check_point")
+    async def check_point_btn(self, inter, btn):
+        bal = get_point_value(inter.user.id)
+        await inter.response.send_message(
+            f"💎 保有ポイント：**{bal:,}pt**",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="📝 パネル内容編集", style=discord.ButtonStyle.secondary, row=2, custom_id="mine:panel_edit")
+    async def edit_panel_btn(self, inter, btn):
+        if not is_owner(inter):
+            return await inter.response.send_message("❌ オーナー専用です", ephemeral=True)
+        class EditModal(discord.ui.Modal(title="📝 パネル内容編集")):
+            title_in = discord.ui.TextInput(label="タイトル", default="💎 マインス 💣", required=True, max_length=30)
+            desc_in = discord.ui.TextInput(label="説明文", 
+                default="下のボタンから難易度を選択してゲームを開始できます！\n✅ かんたん [3個] ｜ ⚪ ふつう [5個] ｜ 🔴 むずかしい [8個] ｜ ⚙️ 自分で設定",
+                required=True, style=discord.TextStyle.long)
+            async def on_submit(s, m):
+                e = discord.Embed(title=s.title_in.value, description=s.desc_in.value, color=0x1a1a1a)
+                await m.response.edit_message(embed=e, view=MinesStartPanelView())
+        await inter.response.send_modal(EditModal())
+
     async def _start_game(self, inter, bombs):
         uid = inter.user.id
         if uid in active_games:
@@ -228,14 +250,12 @@ async def setup(tree: app_commands.CommandTree, bot=None):
     if bot is None:
         return
 
-    # View 永続登録
     if not hasattr(bot, "_mines_views_done"):
         bot.add_view(MinesStartPanelView())
         bot.add_view(BombsSelectView())
         bot._mines_views_done = True
         print("✅ mines_panel View登録完了")
 
-    # インタラクション処理：on_message で拾う
     if not hasattr(bot, "_mines_interaction_done"):
         bot._mines_interaction_done = True
 
