@@ -224,22 +224,19 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message(embed=game.embed(), view=game, ephemeral=True)
         await inter.response.send_modal(BetModal())
 
-async def setup(tree, bot):
-    if not hasattr(bot, "_mines_views_ready"):
+# ✅ スロットと全く同じ書き方に統一
+async def setup(tree: app_commands.CommandTree, bot=None):
+    if bot is not None and not hasattr(bot, "_mines_panel_registered"):
         bot.add_view(MinesStartPanelView())
         bot.add_view(BombsSelectView())
-        bot._mines_views_ready = True
-        print("✅ mines_panel 永久View登録完了")
+        bot._mines_panel_registered = True
+        print("✅ mines_panel 永続View登録完了")
 
-    # ✅ グローバルコマンドに変更 → どのサーバーでも表示
-    @tree.command(
-        name="マインズパネル設置",
-        description="💎 マインス パネルを設置"
-    )
-    async def setup_panel(inter):
-        # ✅ 実行時に所有者チェック → コマンド自体は表示される
-        if not await is_owner(inter):
-            return await inter.response.send_message("❌ 管理者のみ実行可能", ephemeral=True)
+    @tree.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")
+    async def cmd(itx):
+        if not is_owner(itx):  # ✅ awaitなし！スロットと同じ
+            await itx.response.send_message("❌ オーナー専用です", ephemeral=True)
+            return
         e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
         e.description = (
             "爆弾を避けて金塊を集め、好きなタイミングで回収！\n"
@@ -249,7 +246,8 @@ async def setup(tree, bot):
             "🔴 むずかしい [8個]  約96.3倍\n"
             "⚙️ 自分で設定 [1～24個]"
         )
-        await inter.response.send_message(embed=e, view=MinesStartPanelView())
+        await itx.response.send_message(embed=e, view=MinesStartPanelView())
+        await itx.followup.send("✅ マインスパネル設置完了", ephemeral=True)
 
     @bot.listen()
     async def on_interaction(inter):
