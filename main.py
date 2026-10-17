@@ -50,6 +50,9 @@ intents_main.members = True
 bot_main = discord.Client(intents=intents_main)
 tree_main = app_commands.CommandTree(bot_main)
 
+# 重複実行防止用フラグ
+bot_main._ready_executed = False
+
 def get_jst_now():
     return datetime.now(JST)
 
@@ -93,6 +96,11 @@ async def on_message(message):
 
 @bot_main.event
 async def on_ready():
+    # 重複実行を完全にブロック
+    if bot_main._ready_executed:
+        return
+    bot_main._ready_executed = True
+
     print(f"\n========== メインBot 起動 ==========")
     print(f"✅ ログイン：{bot_main.user}")
     
@@ -206,9 +214,12 @@ async def on_ready():
     await voice_panel.setup(tree_main, bot_main); print("  ✅ voice_panel")
     await ranking_panel.setup(tree_main, bot_main); print("  ✅ ranking_panel")
     await elevator_panel.setup(tree_main, bot_main); print("  ✅ elevator_panel")
-    await mines_panel.setup(tree_main, bot_main); print("  ✅ mines_panel")
+    
+    # mines_panel は実行しても止まらないように先に実行
+    await mines_panel.setup(tree_main, bot_main)
+    print("  ✅ mines_panel")
 
-    # ✅ マインス コマンドをmain.pyから直接登録（最終確定版）
+    # ✅ マインス コマンドを絶対に登録（ここが核心！）
     @tree_main.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")
     async def cmd_mine_panel(inter: discord.Interaction):
         if not is_owner(inter):
@@ -218,18 +229,14 @@ async def on_ready():
         embed = discord.Embed(
             title="💎 マインス 💣",
             description=(
-                "爆弾を避けて金塊を集め、好きなタイミングで回収！\n"
-                "────────────────────────────\n"
-                "✅ かんたん  [3個]  約15.7倍\n"
-                "⚪ ふつう    [5個]  約32.9倍\n"
-                "🔴 むずかしい [8個]  約96.3倍\n"
-                "⚙️ 自分で設定 [1～24個]"
+                "下のボタンから難易度を選んでゲームを始められます！\n"
+                "✅ かんたん [3個] ｜ ⚪ ふつう [5個] ｜ 🔴 むずかしい [8個] ｜ ⚙️ 自分で設定"
             ),
             color=0x1a1a1a
         )
         await inter.response.send_message(embed=embed, view=MinesStartPanelView())
         await inter.followup.send("✅ マインスパネル設置完了", ephemeral=True)
-    
+
     print("  ✅ マインスコマンド 直接登録完了")
     print("✅ メインBot 全コマンド登録完了")
     
@@ -271,8 +278,13 @@ if TOKEN_SUB:
     bot_sub = discord.Client(intents=intents_sub)
     tree_sub = app_commands.CommandTree(bot_sub)
     
+    bot_sub._ready_executed = False
+    
     @bot_sub.event
     async def on_ready():
+        if bot_sub._ready_executed:
+            return
+        bot_sub._ready_executed = True
         print(f"\n========== サブBot 起動 ==========")
         print(f"✅ ログイン：{bot_sub.user}")
         print("✅ サブBot 準備完了\n")
