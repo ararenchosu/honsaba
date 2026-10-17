@@ -105,6 +105,11 @@ class MinesGame:
         e.add_field(name="🎯 全盤面", value=self.board_text(reveal_all=True), inline=False)
         return e
 
+    def check_all_opened(self):
+        """当たり枠を全部開けたか判定"""
+        safe = 25 - self.bombs
+        return self.opened_count >= safe
+
 async def create_game_channel(guild: discord.Guild, user: discord.User):
     category = guild.get_channel(MINES_CATEGORY_ID)
     if not category:
@@ -145,7 +150,7 @@ class MinesPlayingView(discord.ui.View):
     def _build_buttons(self):
         self.clear_items()
         g = self.game
-        # 5×5 盤面ボタン（25個以内に収める）
+        # 5×5 盤面ボタン
         for idx in range(25):
             if g.opened[idx]:
                 lbl = "💣" if g.grid[idx] else "💎"
@@ -155,17 +160,13 @@ class MinesPlayingView(discord.ui.View):
                 lbl = "□"
                 style = discord.ButtonStyle.secondary
                 disabled = False
-            # 25個目のボタンのrowを4にして、終了ボタン用のスペースを確保
             btn = discord.ui.Button(label=lbl, style=style, disabled=disabled, row=idx // 5)
             btn.callback = lambda i, idx=idx: self.on_click(i, idx)
             self.add_item(btn)
         
-        # ✅ 終了ボタンを25個目の位置に収めるため、条件付きで表示
-        # 未開封が1つでも残っている場合だけ終了ボタンを表示
-        remaining = sum(1 for o in g.opened if not o)
-        if remaining > 0:
+        # 終了ボタン：まだ開ける場所が残っているときだけ表示
+        if not g.check_all_opened():
             can_end = g.opened_count > 0
-            # 最後の行に配置 → 合計25個以内に収まる
             end_btn = discord.ui.Button(
                 label="💰 この倍率で終了",
                 style=discord.ButtonStyle.primary if can_end else discord.ButtonStyle.secondary,
@@ -182,18 +183,37 @@ class MinesPlayingView(discord.ui.View):
         g = self.game
         if g.game_over or g.opened[idx]:
             return await inter.response.defer()
+        
         g.opened[idx] = True
+        
         if g.grid[idx]:
+            # 爆弾を引いた → 敗北
             g.game_over = True
             add_point_value(g.user_id, -g.bet)
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
             game_states.pop(g.user_id, None)
             embed = g.result_embed("💣 爆弾！", f"🔹 賭け：{g.bet:,}pt\n🔹 結果：-{g.bet:,}pt", 0xE74C3C)
             await inter.response.edit_message(embed=embed, view=MinesResultView(g))
-        else:
-            g.opened_count += 1
-            g.multiplier = calc_step_multiplier(g.bombs, g.opened_count)
-            await inter.response.edit_message(embed=g.playing_embed(), view=MinesPlayingView(g))
+            return
+        
+        # 当たり枠を開けた
+        g.opened_count += 1
+        g.multiplier = calc_step_multiplier(g.bombs, g.opened_count)
+        
+        # ✅ 全部開け切った → 自動終了
+        if g.check_all_opened():
+            g.game_over = True
+            win = int(g.bet * g.multiplier)
+            add_point_value(g.user_id, win)
+            last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
+            game_states.pop(g.user_id, None)
+            embed = g.result_embed("🎉 全開け！",
+                f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{g.multiplier}倍\n🔹 獲得：+{win:,}pt", 0x2ECC71)
+            await inter.response.edit_message(embed=embed, view=MinesResultView(g))
+            return
+        
+        # まだ続く場合：画面更新
+        await inter.response.edit_message(embed=g.playing_embed(), view=MinesPlayingView(g))
 
     async def on_end(self, inter):
         g = self.game
@@ -256,16 +276,15 @@ class MinesResultView(discord.ui.View):
                 new_game.message = old_msg
                 message_map[uid] = old_msg
                 await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
-            except Exception as e2:
+            except Exception:
                 try:
                     new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
                     new_game.message = new_msg
                     message_map[uid] = new_msg
                     await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
-                except Exception as e3:
+                except Exception as e2:
                     game_states.pop(uid, None)
-                    await inter.response.send_message(
-                        f"❌ メッセージ送信失敗：{e3}", ephemeral=True)
+                    await inter.response.send_message(f"❌ メッセージ送信失敗：{e2}", ephemeral=True)
         else:
             try:
                 new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
@@ -274,8 +293,7 @@ class MinesResultView(discord.ui.View):
                 await inter.response.send_message(f"✅ ゲーム開始 → {channel.mention}", ephemeral=True)
             except Exception as e:
                 game_states.pop(uid, None)
-                await inter.response.send_message(
-                    f"❌ メッセージ送信失敗：{e}", ephemeral=True)
+                await inter.response.send_message(f"❌ メッセージ送信失敗：{e}", ephemeral=True)
 
     async def on_close(self, inter):
         if inter.user.id != self.game.user_id and not inter.user.guild_permissions.administrator:
