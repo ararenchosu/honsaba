@@ -28,6 +28,8 @@ import features.welcome_leave as welcome_leave
 import features.voice_channel_panel as voice_panel
 import features.ranking_panel as ranking_panel
 import features.elevator_panel as elevator_panel
+# ✅ マインス（サブBot用）
+import features.mines_panel as mines_panel
 
 JST = timezone(timedelta(hours=9))
 STATUS_LOG_CHANNEL_ID = 1559119439981449256
@@ -41,7 +43,6 @@ if not TOKEN_MAIN:
     print("❌ 環境変数 DISCORD_TOKEN が設定されていません")
     exit(1)
 print(f"✅ メイントークン読み込み完了：{TOKEN_MAIN[:10]}...")
-
 intents_main = discord.Intents.default()
 intents_main.message_content = True
 intents_main.members = True
@@ -95,7 +96,6 @@ async def on_ready():
     print(f"✅ ログイン：{bot_main.user}")
     
     last_reason = get_and_clear_reason()
-
     def check_view_no_args(view_class, view_name: str):
         try:
             instance = view_class()
@@ -153,7 +153,6 @@ async def on_ready():
             (ranking_panel.RankingPanelView, "RankingPanelView"),
             (ElevatorView, "ElevatorView"),
         ]
-
         for view_cls, name in views_to_register_main:
             instance = check_view_no_args(view_cls, name)
             if instance:
@@ -225,15 +224,13 @@ async def on_close():
         set_reason("update")
 
 # ==================================================
-# 🔵 Bot2：サブBot — 動画リンク機能削除済み
+# 🔵 Bot2：サブBot — ✅ マインス追加
 # ==================================================
 TOKEN_SUB = os.getenv("DISCORD_TOKEN_SUB")
 bot_sub = None
 tree_sub = None
 
-if not TOKEN_SUB:
-    print("⚠️ 環境変数 DISCORD_TOKEN_SUB が未設定 → サブBotは起動しません")
-else:
+if TOKEN_SUB:
     print(f"✅ サブトークン読み込み完了：{TOKEN_SUB[:10]}...")
     intents_sub = discord.Intents.default()
     intents_sub.message_content = True
@@ -245,14 +242,35 @@ else:
     async def on_ready():
         print(f"\n========== サブBot 起動 ==========")
         print(f"✅ ログイン：{bot_sub.user}")
-        print("\n🔍 サブBot View 登録エリア")
-        print("ℹ️ 現在サブBot専用のViewは登録されていません")
-        print("\n🔄 サブBot コマンド登録エリア")
-        print("ℹ️ 現在サブBot専用のコマンドは登録されていません")
+
+        print("\n🔍 サブBot View 永続化チェック & 登録中...")
+        try:
+            from features.mines_panel import MinesStartPanelView, BombsSelectView
+            views_to_register_sub = [
+                (MinesStartPanelView, "MinesStartPanelView"),
+                (BombsSelectView, "BombsSelectView"),
+            ]
+            for view_cls, name in views_to_register_sub:
+                instance = check_view_no_args(view_cls, name)
+                if instance:
+                    bot_sub.add_view(instance)
+                    print(f"   ✅ {name}")
+            print("✅ サブBot 全View 永続登録完了 ✨")
+        except Exception as e:
+            print(f"❌ サブBot View登録エラー: {e}")
+            import traceback
+            traceback.print_exc()
+
+        print("\n🔄 サブBot コマンド登録中...")
+        await mines_panel.setup(tree_sub, bot_sub); print("  ✅ mines_panel")
+        print("✅ サブBot 全コマンド登録完了")
+
         print("\n🔄 サブBot グローバル同期中...")
         synced_sub = await tree_sub.sync()
         print(f"✅ サブBot 同期完了！合計 {len(synced_sub)} 件")
         print("✅ サブBot 準備完了\n")
+else:
+    print("⚠️ 環境変数 DISCORD_TOKEN_SUB が未設定 → サブBotは起動しません")
 
 # ==================================================
 # 🚀 並行起動
