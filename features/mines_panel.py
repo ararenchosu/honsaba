@@ -163,6 +163,9 @@ channel_map = {}
 message_map = {}
 control_message_map = {}
 
+# ===== ✅ グローバルで1つだけViewインスタンスを作成 =====
+main_panel_view = None
+
 class MinesGame:
     def __init__(self, user: discord.User, bombs: int, bet: int):
         self.user = user
@@ -435,7 +438,7 @@ class MinesResultView(discord.ui.View):
 # ===== ✅ 履歴表示・削除用View =====
 class HistoryView(discord.ui.View):
     def __init__(self, user_id, page=0):
-        super().__init__(timeout=None)  # ✅ 永続化
+        super().__init__(timeout=None)
         self.user_id = user_id
         self.page = page
         self.per_page = 5
@@ -449,7 +452,6 @@ class HistoryView(discord.ui.View):
         end = start + self.per_page
         page_items = self.history[start:end]
 
-        # 履歴項目ボタン
         for idx, item in enumerate(page_items):
             label = f"{start+idx+1}. {item['time']} | {item['bombs']}個"
             if item["result"] == "lose":
@@ -462,33 +464,18 @@ class HistoryView(discord.ui.View):
             btn.callback = lambda i, idx_=start+idx: self.on_delete(i, idx_)
             self.add_item(btn)
 
-        # 前へ
-        prev_btn = discord.ui.Button(
-            label="◀ 前", style=discord.ButtonStyle.secondary, row=5,
-            disabled=self.page <= 0
-        )
+        prev_btn = discord.ui.Button(label="◀ 前", style=discord.ButtonStyle.secondary, row=5, disabled=self.page <= 0)
         prev_btn.callback = self.on_prev
         self.add_item(prev_btn)
 
-        # ページ表示
-        page_label = discord.ui.Button(
-            label=f"{self.page+1}/{self.total_pages}",
-            style=discord.ButtonStyle.grey, disabled=True, row=5
-        )
+        page_label = discord.ui.Button(label=f"{self.page+1}/{self.total_pages}", style=discord.ButtonStyle.grey, disabled=True, row=5)
         self.add_item(page_label)
 
-        # 次へ
-        next_btn = discord.ui.Button(
-            label="次 ▶", style=discord.ButtonStyle.secondary, row=5,
-            disabled=self.page+1 >= self.total_pages
-        )
+        next_btn = discord.ui.Button(label="次 ▶", style=discord.ButtonStyle.secondary, row=5, disabled=self.page+1 >= self.total_pages)
         next_btn.callback = self.on_next
         self.add_item(next_btn)
 
-        # 全削除
-        clear_btn = discord.ui.Button(
-            label="🗑️ 全履歴削除", style=discord.ButtonStyle.danger, row=6
-        )
+        clear_btn = discord.ui.Button(label="🗑️ 全履歴削除", style=discord.ButtonStyle.danger, row=6)
         clear_btn.callback = self.on_clear
         self.add_item(clear_btn)
 
@@ -539,21 +526,21 @@ class HistoryView(discord.ui.View):
 
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # ✅ 絶対押せるように
+        super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v7_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v8_easy")
     async def easy(self, inter, btn):
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v7_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v8_normal")
     async def normal(self, inter, btn):
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v7_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v8_hard")
     async def hard(self, inter, btn):
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v7_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v8_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
@@ -585,7 +572,7 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetInputModal())
 
-    @discord.ui.button(label="📋 履歴・削除", style=discord.ButtonStyle.primary, row=2, custom_id="mine_v7_history")
+    @discord.ui.button(label="📋 履歴・削除", style=discord.ButtonStyle.primary, row=2, custom_id="mine_v8_history")
     async def history(self, inter, btn):
         uid = inter.user.id
         view = HistoryView(uid)
@@ -641,5 +628,8 @@ async def start_game(user, guild, bombs, bet):
         raise Exception(f"メッセージ送信失敗：{e}")
 
 async def setup(tree, bot):
-    # ✅ 永続View登録
-    bot.add_view(MinesStartPanelView())
+    global main_panel_view
+    # ✅ 起動時に必ず登録
+    main_panel_view = MinesStartPanelView()
+    bot.add_view(main_panel_view)
+    print("✅ マインスパネルView登録完了")
