@@ -28,29 +28,28 @@ def add_points(user_id: int, amount: int):
     uid = str(user_id)
     data[uid] = data.get(uid, 0) + amount
     save_data(data)
+    return data[uid]
 
 def set_points(user_id: int, amount: int):
     data = load_data()
     data[str(user_id)] = amount
     save_data(data)
 
-# ========== ユーザー選択 ==========
+# ========== ユーザー選択View（修正版） ==========
 class SelectUserView(discord.ui.View):
     def __init__(self, callback):
         super().__init__(timeout=120)
-        self.callback = callback
-        self.add_item(
-            discord.ui.UserSelect(
-                placeholder="ユーザーを選択してください",
-                min_values=1,
-                max_values=1
-            )
-        )
+        self._callback = callback
 
-    async def interaction_check(self, inter: discord.Interaction) -> bool:
-        user = self.children[0].values[0]
-        await self.callback(inter, user)
-        return True
+    @discord.ui.user_select(
+        placeholder="ユーザーを選択してください",
+        min_values=1,
+        max_values=1,
+        custom_id="point_admin:select_user"
+    )
+    async def select_user(self, inter: discord.Interaction, user: discord.User):
+        await self._callback(inter, user)
+        self.stop()
 
 # ========== 管理パネル ==========
 class PointAdminView(discord.ui.View):
@@ -70,24 +69,28 @@ class PointAdminView(discord.ui.View):
 
         async def on_user_selected(inter, user):
             class AmountModal(discord.ui.Modal, title="ポイント付与"):
-                amount = discord.ui.TextInput(label="付与するポイント数", required=True)
+                amount = discord.ui.TextInput(
+                    label="付与するポイント数",
+                    required=True
+                )
                 async def on_submit(self, m_itx):
                     try:
-                        val = int(self.amount.value)
-                    except:
-                        await m_itx.response.send_message("❌ 数値を入力してください", ephemeral=True)
+                        val = int(self.amount.value.strip())
+                    except ValueError:
+                        await m_itx.response.send_message("❌ 数値を正しく入力してください", ephemeral=True)
                         return
-                    add_points(user.id, val)
-                    now_pts = get_points(user.id)
+                    now_pts = add_points(user.id, val)
                     await m_itx.response.send_message(
-                        f"✅ {user.mention} に {val:,} pt 付与しました\n現在：{now_pts:,} pt",
+                        f"✅ {user.mention} に {val:,} pt 付与しました\n"
+                        f"💳 現在：{now_pts:,} pt",
                         ephemeral=True
                     )
             await inter.response.send_modal(AmountModal())
 
+        view = SelectUserView(on_user_selected)
         await itx.response.send_message(
             "対象ユーザーを選択してください",
-            view=SelectUserView(on_user_selected),
+            view=view,
             ephemeral=True
         )
 
@@ -104,24 +107,28 @@ class PointAdminView(discord.ui.View):
 
         async def on_user_selected(inter, user):
             class AmountModal(discord.ui.Modal, title="ポイント減算"):
-                amount = discord.ui.TextInput(label="減算するポイント数", required=True)
+                amount = discord.ui.TextInput(
+                    label="減算するポイント数",
+                    required=True
+                )
                 async def on_submit(self, m_itx):
                     try:
-                        val = int(self.amount.value)
-                    except:
-                        await m_itx.response.send_message("❌ 数値を入力してください", ephemeral=True)
+                        val = int(self.amount.value.strip())
+                    except ValueError:
+                        await m_itx.response.send_message("❌ 数値を正しく入力してください", ephemeral=True)
                         return
-                    add_points(user.id, -val)
-                    now_pts = get_points(user.id)
+                    now_pts = add_points(user.id, -val)
                     await m_itx.response.send_message(
-                        f"✅ {user.mention} から {val:,} pt 減算しました\n現在：{now_pts:,} pt",
+                        f"✅ {user.mention} から {val:,} pt 減算しました\n"
+                        f"💳 現在：{now_pts:,} pt",
                         ephemeral=True
                     )
             await inter.response.send_modal(AmountModal())
 
+        view = SelectUserView(on_user_selected)
         await itx.response.send_message(
             "対象ユーザーを選択してください",
-            view=SelectUserView(on_user_selected),
+            view=view,
             ephemeral=True
         )
 
@@ -138,12 +145,15 @@ class PointAdminView(discord.ui.View):
 
         async def on_user_selected(inter, user):
             class AmountModal(discord.ui.Modal, title="ポイント設定"):
-                amount = discord.ui.TextInput(label="設定するポイント数", required=True)
+                amount = discord.ui.TextInput(
+                    label="設定するポイント数",
+                    required=True
+                )
                 async def on_submit(self, m_itx):
                     try:
-                        val = int(self.amount.value)
-                    except:
-                        await m_itx.response.send_message("❌ 数値を入力してください", ephemeral=True)
+                        val = int(self.amount.value.strip())
+                    except ValueError:
+                        await m_itx.response.send_message("❌ 数値を正しく入力してください", ephemeral=True)
                         return
                     set_points(user.id, val)
                     await m_itx.response.send_message(
@@ -152,9 +162,10 @@ class PointAdminView(discord.ui.View):
                     )
             await inter.response.send_modal(AmountModal())
 
+        view = SelectUserView(on_user_selected)
         await itx.response.send_message(
             "対象ユーザーを選択してください",
-            view=SelectUserView(on_user_selected),
+            view=view,
             ephemeral=True
         )
 
@@ -176,13 +187,13 @@ class PointAdminView(discord.ui.View):
                 ephemeral=True
             )
 
+        view = SelectUserView(on_user_selected)
         await itx.response.send_message(
             "対象ユーザーを選択してください",
-            view=SelectUserView(on_user_selected),
+            view=view,
             ephemeral=True
         )
 
-# ✅ 引数を統一：setup(tree, bot=None)
 async def setup(tree: app_commands.CommandTree, bot=None):
     if bot is not None and not hasattr(bot, "_point_admin_registered"):
         bot.add_view(PointAdminView())
