@@ -40,22 +40,52 @@ def add_point_value(user_id, amount):
     save_points_all(data)
     return data["points"][uid]
 
+# ==========================================================
+# 🔥 超絶高倍率設定 🔥
+# ==========================================================
 FINAL_MULTIPLIER = {
-    1: 11.2, 2: 13.0, 3: 15.7, 4: 21.45, 5: 32.9, 6: 45.85, 7: 64.15, 8: 96.3,
-    9: 145.5, 10: 201.75, 11: 341.25, 12: 492.3, 13: 852.5, 14: 1520.0,
-    15: 2805.0, 16: 5545.0, 17: 11730.0, 18: 26540.0, 19: 66350.0, 20: 182400.0,
-    21: 570000.0, 22: 2090000.0, 23: 10150000.0, 24: 126500000.0,
+     1:    25.0,   # 1個  → 25倍
+     2:    40.0,   # 2個  → 40倍
+     3:    65.0,   # 3個  → 65倍
+     4:   100.0,   # 4個  → 100倍
+     5:   160.0,   # 5個  → 160倍
+     6:   260.0,   # 6個  → 260倍
+     7:   420.0,   # 7個  → 420倍
+     8:   680.0,   # 8個  → 680倍
+     9:  1100.0,   # 9個  → 1,100倍
+    10:  1800.0,   # 10個 → 1,800倍
+    11:  3000.0,   # 11個 → 3,000倍
+    12:  5000.0,   # 12個 → 5,000倍
+    13:  8500.0,   # 13個 → 8,500倍
+    14: 15000.0,   # 14個 → 15,000倍
+    15: 27000.0,   # 15個 → 27,000倍
+    16: 50000.0,   # 16個 → 50,000倍
+    17:100000.0,   # 17個 → 100,000倍
+    18:250000.0,   # 18個 → 250,000倍
+    19:600000.0,   # 19個 → 600,000倍
+    20:  2000000.0, # 20個 → 200万倍
+    21:  8000000.0, # 21個 → 800万倍
+    22: 35000000.0, # 22個 → 3,500万倍
+    23:200000000.0, # 23個 → 2億倍
+    24:5000000000.0, # 24個 → 50億倍 💥
 }
 
 def format_mul(val):
-    return f"{val:,}倍" if val >= 1000 else f"{val}倍"
+    if val >= 100000000:
+        return f"{val/100000000:.1f}億倍"
+    elif val >= 10000:
+        return f"{val/10000:.1f}万倍"
+    elif val >= 1000:
+        return f"{val:,}倍"
+    return f"{val:.1f}倍"
 
 def calc_step_multiplier(bombs: int, opened: int):
     safe = 25 - bombs
     if opened >= safe:
         return FINAL_MULTIPLIER[bombs]
     ratio = opened / safe
-    return round(1.0 + (FINAL_MULTIPLIER[bombs] - 1.0) * ratio ** 1.5, 2)
+    # 上がり幅を急激に
+    return round(1.0 + (FINAL_MULTIPLIER[bombs] - 1.0) * ratio ** 2.2, 2)
 
 game_states = {}
 last_settings = {}
@@ -94,11 +124,11 @@ class MinesGame:
         return "\n".join(lines)
 
     def playing_embed(self):
-        e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
+        e = discord.Embed(title="💎 マインス 💣", color=0xFFD700)
         e.add_field(name="🔹 プレイヤー", value=self.user.mention, inline=True)
         e.add_field(name="🔹 爆弾数", value=f"{self.bombs}個", inline=True)
         e.add_field(name="🔹 賭け額", value=f"{self.bet:,}pt", inline=True)
-        e.add_field(name="🔹 現在倍率", value=f"**{self.multiplier}倍**", inline=True)
+        e.add_field(name="🔥 現在倍率", value=f"**{format_mul(self.multiplier)}**", inline=True)
         e.add_field(name="🎯 盤面", value=self.board_text(), inline=False)
         return e
 
@@ -165,7 +195,6 @@ class MinesBoardView(discord.ui.View):
             self.add_item(btn)
 
     async def interaction_check(self, inter):
-        # 既にゲーム終了またはチャンネル削除済み → 応答しない
         if self.game.game_over or self.game.user_id not in game_states:
             return False
         return inter.user.id == self.game.user_id
@@ -201,7 +230,7 @@ class MinesBoardView(discord.ui.View):
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
             game_states.pop(g.user_id, None)
             embed = g.result_embed("🎉 全開け！",
-                f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{g.multiplier}倍\n🔹 獲得：+{win:,}pt", 0x2ECC71)
+                f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{format_mul(g.multiplier)}\n🔹 獲得：+{win:,}pt", 0xFFD700)
             try:
                 await inter.response.edit_message(embed=embed, view=MinesResultView(g))
                 if g.control_message:
@@ -250,7 +279,7 @@ class MinesControlView(discord.ui.View):
         last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
         game_states.pop(g.user_id, None)
         embed = g.result_embed("💰 回収完了！",
-            f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{g.multiplier}倍\n🔹 獲得：+{win:,}pt", 0x2ECC71)
+            f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{format_mul(g.multiplier)}\n🔹 獲得：+{win:,}pt", 0x2ECC71)
         try:
             if g.message:
                 await g.message.edit(embed=embed, view=MinesResultView(g))
@@ -270,10 +299,6 @@ class MinesResultView(discord.ui.View):
         close_btn = discord.ui.Button(label="🗑️ チャンネルを閉じる", style=discord.ButtonStyle.danger, row=0)
         close_btn.callback = self.on_close
         self.add_item(close_btn)
-
-    async def interaction_check(self, inter):
-        # 閉じた後に押されても無視
-        return True
 
     async def on_retry(self, inter):
         uid = self.game.user_id
@@ -319,7 +344,6 @@ class MinesResultView(discord.ui.View):
 
     async def on_close(self, inter):
         uid = self.game.user_id
-        # 先にマップから削除 → 後から押されても無視される
         c = channel_map.pop(uid, None)
         message_map.pop(uid, None)
         control_message_map.pop(uid, None)
@@ -337,19 +361,19 @@ class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.success, row=0, custom_id="mine:panel_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v3_easy")
     async def easy(self, inter, btn):
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.secondary, row=0, custom_id="mine:panel_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v3_normal")
     async def normal(self, inter, btn):
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.danger, row=0, custom_id="mine:panel_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v3_hard")
     async def hard(self, inter, btn):
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.primary, row=1, custom_id="mine:panel_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v3_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
@@ -390,7 +414,7 @@ class MinesStartPanelView(discord.ui.View):
         bal = get_point_value(uid)
         class BetModal(discord.ui.Modal, title=f"💎 爆弾{bombs}個"):
             bet_in = discord.ui.TextInput(
-                label=f"倍率：{mul}\n賭けるポイント",
+                label=f"🔥 最大倍率：{mul}\n賭けるポイント",
                 placeholder="例：1000",
                 required=True
             )
