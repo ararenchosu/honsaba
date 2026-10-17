@@ -47,11 +47,9 @@ def calc_step_multiplier(bombs: int, opened: int):
 
 # ========== ゲーム本体 ==========
 active_games = {}
-
-# ✅ 補足：MinesGameViewは動的に生成されるゲーム用なので永続登録しない（起動チェックから除外）
 class MinesGameView(discord.ui.View):
     def __init__(self, user_id: int, bombs: int, bet: int):
-        super().__init__(timeout=None)  # 一応Noneに
+        super().__init__(timeout=None)
         self.user_id = user_id
         self.bombs = bombs
         self.bet = bet
@@ -123,11 +121,11 @@ class MinesGameView(discord.ui.View):
             color=0x2ECC71)
         await inter.response.edit_message(embed=e, view=None)
 
-# ========== 爆弾数選択（ページ式） — ✅ 完全永続対応 ==========
+# ========== 爆弾数選択 ==========
 BOMBS_PER_PAGE = 8
 class BombsSelectView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # ✅ 絶対None
+        super().__init__(timeout=None)
         self.page = 0
         self.selected = None
         self._render()
@@ -140,7 +138,7 @@ class BombsSelectView(discord.ui.View):
             style = discord.ButtonStyle.secondary if self.selected == n else discord.ButtonStyle.grey
             self.add_item(discord.ui.Button(
                 label=str(n), style=style,
-                custom_id=f"mine:bomb_sel:{n}"  # ✅ 全てにcustom_id
+                custom_id=f"mine:bomb_sel:{n}"
             ))
         prev_d = self.page == 0
         next_d = end >= 24
@@ -148,7 +146,6 @@ class BombsSelectView(discord.ui.View):
             label="◀ 前", style=discord.ButtonStyle.grey, disabled=prev_d,
             custom_id="mine:bomb_prev", row=4
         ))
-        # ✅ 無効ボタンにもcustom_id必須
         self.add_item(discord.ui.Button(
             label=f"{self.page+1}/3", style=discord.ButtonStyle.secondary, disabled=True,
             custom_id="mine:bomb_page_info", row=4
@@ -172,10 +169,10 @@ class BombsSelectView(discord.ui.View):
             e.add_field(name="選択中", value=f"**{self.selected}個**", inline=False)
         return e
 
-# ========== スタートパネル（永久） — ✅ 完全永続対応 ==========
+# ========== スタートパネル ==========
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # ✅ 絶対None
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.success, row=0, custom_id="mine:panel_easy")
     async def easy(self, inter, btn):
@@ -213,19 +210,17 @@ class MinesStartPanelView(discord.ui.View):
 # ========== セットアップ ==========
 async def setup(tree, bot):
     if not hasattr(bot, "_mines_views_ready"):
-        # ✅ 永続登録は引数なしでインスタンス化できるViewのみ
         bot.add_view(MinesStartPanelView())
         bot.add_view(BombsSelectView())
         bot._mines_views_ready = True
         print("✅ mines_panel 永久View登録完了")
 
-        @tree.command(name="マインズパネル設置", description="💎 マインス パネルを設置")
+    @tree.command(name="マインズパネル設置", description="💎 マインス パネルを設置")
     @app_commands.check(is_owner)
     async def setup_panel(inter):
         e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
         e.description = (
             "爆弾を避けて金塊を集め、好きなタイミングで回収！\n"
-            "倍率はすべて5倍計算 ｜ ボタンはいつでも使えます\n"
             "────────────────────────────\n"
             "✅ かんたん  [3個]  約15.7倍\n"
             "⚪ ふつう    [5個]  約32.9倍\n"
