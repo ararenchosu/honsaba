@@ -127,15 +127,6 @@ def save_history_entry(entry):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
 
-def delete_history_entry(index):
-    all_data = load_history()
-    if 0 <= index < len(all_data):
-        all_data.pop(index)
-        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(all_data, f, ensure_ascii=False, indent=2)
-        return True
-    return False
-
 def clear_history_user(user_id):
     all_data = load_history()
     all_data = [h for h in all_data if h.get("user_id") != user_id]
@@ -163,7 +154,6 @@ channel_map = {}
 message_map = {}
 control_message_map = {}
 
-# ===== ✅ グローバルで1つだけViewインスタンスを作成 =====
 main_panel_view = None
 
 class MinesGame:
@@ -435,112 +425,23 @@ class MinesResultView(discord.ui.View):
         except Exception:
             pass
 
-# ===== ✅ 履歴表示・削除用View =====
-class HistoryView(discord.ui.View):
-    def __init__(self, user_id, page=0):
-        super().__init__(timeout=None)
-        self.user_id = user_id
-        self.page = page
-        self.per_page = 5
-        self.history = load_history(user_id)
-        self.total_pages = (len(self.history) - 1) // self.per_page + 1 if self.history else 1
-        self._update_buttons()
-
-    def _update_buttons(self):
-        self.clear_items()
-        start = self.page * self.per_page
-        end = start + self.per_page
-        page_items = self.history[start:end]
-
-        for idx, item in enumerate(page_items):
-            label = f"{start+idx+1}. {item['time']} | {item['bombs']}個"
-            if item["result"] == "lose":
-                style = discord.ButtonStyle.red
-            elif item["result"] == "cashout":
-                style = discord.ButtonStyle.primary
-            else:
-                style = discord.ButtonStyle.green
-            btn = discord.ui.Button(label=label, style=style, row=idx)
-            btn.callback = lambda i, idx_=start+idx: self.on_delete(i, idx_)
-            self.add_item(btn)
-
-        prev_btn = discord.ui.Button(label="◀ 前", style=discord.ButtonStyle.secondary, row=5, disabled=self.page <= 0)
-        prev_btn.callback = self.on_prev
-        self.add_item(prev_btn)
-
-        page_label = discord.ui.Button(label=f"{self.page+1}/{self.total_pages}", style=discord.ButtonStyle.grey, disabled=True, row=5)
-        self.add_item(page_label)
-
-        next_btn = discord.ui.Button(label="次 ▶", style=discord.ButtonStyle.secondary, row=5, disabled=self.page+1 >= self.total_pages)
-        next_btn.callback = self.on_next
-        self.add_item(next_btn)
-
-        clear_btn = discord.ui.Button(label="🗑️ 全履歴削除", style=discord.ButtonStyle.danger, row=6)
-        clear_btn.callback = self.on_clear
-        self.add_item(clear_btn)
-
-    async def on_prev(self, inter):
-        self.page -= 1
-        self._update_buttons()
-        await inter.response.edit_message(view=self)
-
-    async def on_next(self, inter):
-        self.page += 1
-        self._update_buttons()
-        await inter.response.edit_message(view=self)
-
-    async def on_delete(self, inter, idx):
-        confirm_view = discord.ui.View(timeout=60)
-        yes = discord.ui.Button(label="✅ 削除する", style=discord.ButtonStyle.danger)
-        no = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.secondary)
-        async def cb_yes(i):
-            delete_history_entry(idx)
-            self.history = load_history(self.user_id)
-            self._update_buttons()
-            await i.response.edit_message(content="✅ 削除しました", view=self)
-        async def cb_no(i):
-            await i.response.edit_message(content="❌ キャンセルしました", view=None)
-        yes.callback = cb_yes
-        no.callback = cb_no
-        confirm_view.add_item(yes)
-        confirm_view.add_item(no)
-        await inter.response.send_message(
-            f"⚠️ この履歴を削除しますか？\n{self.history[idx]['time']} | {format_value(self.history[idx]['bet'])} | {self.history[idx]['multiplier']}",
-            view=confirm_view, ephemeral=True
-        )
-
-    async def on_clear(self, inter):
-        confirm_view = discord.ui.View(timeout=60)
-        yes = discord.ui.Button(label="✅ 全て削除", style=discord.ButtonStyle.danger)
-        no = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.secondary)
-        async def cb_yes(i):
-            clear_history_user(self.user_id)
-            await i.response.edit_message(content="✅ 全ての履歴を削除しました", view=None)
-        async def cb_no(i):
-            await i.response.edit_message(content="❌ キャンセルしました", view=None)
-        yes.callback = cb_yes
-        no.callback = cb_no
-        confirm_view.add_item(yes)
-        confirm_view.add_item(no)
-        await inter.response.send_message("⚠️ これまでの履歴を全て削除しますか？", view=confirm_view, ephemeral=True)
-
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v8_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v9_easy")
     async def easy(self, inter, btn):
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v8_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v9_normal")
     async def normal(self, inter, btn):
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v8_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v9_hard")
     async def hard(self, inter, btn):
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v8_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v9_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
@@ -572,13 +473,36 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetInputModal())
 
-    @discord.ui.button(label="📋 履歴・削除", style=discord.ButtonStyle.primary, row=2, custom_id="mine_v8_history")
-    async def history(self, inter, btn):
+    # ✅ 全履歴一括削除ボタンに変更
+    @discord.ui.button(label="📋 全プレイ履歴削除", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v9_clearall")
+    async def clear_all_history(self, inter, btn):
         uid = inter.user.id
-        view = HistoryView(uid)
-        if not view.history:
+        user_history = load_history(uid)
+        if not user_history:
             return await inter.response.send_message("📋 まだプレイ履歴がありません", ephemeral=True)
-        await inter.response.send_message("📋 プレイ履歴（削除したい項目をクリック）", view=view, ephemeral=True)
+        
+        # ✅ 確認ダイアログ
+        confirm_view = discord.ui.View(timeout=60)
+        yes_btn = discord.ui.Button(label="✅ 全て削除する", style=discord.ButtonStyle.danger)
+        no_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.secondary)
+        
+        async def confirm_yes(i):
+            clear_history_user(uid)
+            await i.response.edit_message(content="✅ プレイ履歴を全て削除しました！", view=None)
+        
+        async def confirm_no(i):
+            await i.response.edit_message(content="❌ キャンセルしました", view=None)
+        
+        yes_btn.callback = confirm_yes
+        no_btn.callback = confirm_no
+        confirm_view.add_item(yes_btn)
+        confirm_view.add_item(no_btn)
+        
+        await inter.response.send_message(
+            f"⚠️ これまでのプレイ履歴 **{len(user_history)}件** を全て削除しますか？\nこの操作は取り消せません！",
+            view=confirm_view,
+            ephemeral=True
+        )
 
     async def _start_fixed(self, inter, bombs):
         uid = inter.user.id
@@ -629,7 +553,6 @@ async def start_game(user, guild, bombs, bet):
 
 async def setup(tree, bot):
     global main_panel_view
-    # ✅ 起動時に必ず登録
     main_panel_view = MinesStartPanelView()
     bot.add_view(main_panel_view)
     print("✅ マインスパネルView登録完了")
