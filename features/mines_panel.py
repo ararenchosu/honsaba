@@ -66,62 +66,65 @@ class MinesGameView(discord.ui.View):
         self.game_over = False
         for p in random.sample(range(25), bombs):
             self.grid[p] = True
-        self._build_buttons()
+        self._render_buttons()
 
-    def _build_buttons(self):
+    def _render_buttons(self):
+        """ボタンを組み直す（状態変更のたびに呼ぶ）"""
         self.clear_items()
         for idx in range(25):
-            if self.game_over:
+            if self.game_over or self.opened[idx]:
                 label = "💣" if self.grid[idx] else "💎"
                 style = discord.ButtonStyle.danger if self.grid[idx] else discord.ButtonStyle.success
-                disabled = True
-            elif self.opened[idx]:
-                label = "💣" if self.grid[idx] else "💎"
-                style = discord.ButtonStyle.danger if self.grid[idx] else discord.ButtonStyle.success
-                disabled = True
+                is_disabled = True
             else:
                 label = "□"
                 style = discord.ButtonStyle.secondary
-                disabled = False
+                is_disabled = False
             self.add_item(discord.ui.Button(
-                label=label, style=style, disabled=disabled,
+                label=label,
+                style=style,
+                disabled=is_disabled,
                 custom_id=f"mine:cell:{self.user_id}:{idx}"
             ))
         if not self.game_over and self.opened_count > 0:
             self.add_item(discord.ui.Button(
-                label="💰 回収", style=discord.ButtonStyle.primary, row=4,
+                label="💰 回収",
+                style=discord.ButtonStyle.primary,
+                row=4,
                 custom_id=f"mine:cash:{self.user_id}"
             ))
 
-    def _build_end_buttons(self):
+    def _render_end_buttons(self):
+        """終了画面用ボタンに置き換え"""
         self.clear_items()
         if self.user_id in last_settings:
             self.add_item(discord.ui.Button(
-                label="🔄 同じ設定でもう1回", style=discord.ButtonStyle.primary, row=0,
+                label="🔄 同じ設定でもう1回",
+                style=discord.ButtonStyle.primary,
+                row=0,
                 custom_id=f"mine:retry:{self.user_id}"
             ))
         self.add_item(discord.ui.Button(
-            label="📋 パネルに戻る", style=discord.ButtonStyle.secondary, row=0,
+            label="📋 パネルに戻る",
+            style=discord.ButtonStyle.secondary,
+            row=0,
             custom_id=f"mine:back_panel:{self.user_id}"
         ))
 
-    def make_board_text(self):
-        """5×5 マスの文字列作成"""
+    def _board_text(self):
         lines = []
         for r in range(5):
-            line = ""
+            row = []
             for c in range(5):
                 idx = r * 5 + c
                 if self.game_over or self.opened[idx]:
-                    line += "💣" if self.grid[idx] else "💎"
+                    row.append("💣" if self.grid[idx] else "💎")
                 else:
-                    line += "⬜"
-            lines.append(" ".join(line))
+                    row.append("□")
+            lines.append(" ".join(row))
         return "\n".join(lines)
 
-    def make_embed(self):
-        if self.game_over:
-            return None
+    def make_playing_embed(self):
         e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
         e.add_field(name="🔹 爆弾数", value=f"{self.bombs}個", inline=True)
         e.add_field(name="🔹 賭け額", value=f"{self.bet:,}pt", inline=True)
@@ -130,57 +133,59 @@ class MinesGameView(discord.ui.View):
 
     def make_result_embed(self, title, desc, color):
         e = discord.Embed(title=title, description=desc, color=color)
-        e.add_field(name="🎯 盤面", value=self.make_board_text(), inline=False)
+        e.add_field(name="🎯 全盤面", value=self._board_text(), inline=False)
         return e
 
     async def open_cell(self, inter, idx):
         if inter.user.id != self.user_id or self.game_over:
             return await inter.response.defer()
-        
+
         self.opened[idx] = True
-        
+
         if self.grid[idx]:
-            # 爆弾：全マス表示＋結果ボタン
+            # 爆弾
             self.game_over = True
             add_point_value(self.user_id, -self.bet)
             if self.user_id in active_games:
                 del active_games[self.user_id]
             last_settings[self.user_id] = {"bombs": self.bombs, "bet": self.bet}
-            
-            e = self.make_result_embed(
+
+            embed = self.make_result_embed(
                 "💣 爆弾！",
                 f"🔹 賭け：{self.bet:,}pt\n🔹 結果：-{self.bet:,}pt",
                 0xE74C3C
             )
-            self._build_buttons()
-            self._build_end_buttons()
-            await inter.response.edit_message(embed=e, view=self)
+            self._render_buttons()
+            self._render_end_buttons()
+            await inter.response.edit_message(embed=embed, view=self)
+
         else:
-            # 当たり：表示更新
+            # 当たり — ここを確実に更新
             self.opened_count += 1
             self.multiplier = calc_step_multiplier(self.bombs, self.opened_count)
-            self._build_buttons()
-            await inter.response.edit_message(embed=self.make_embed(), view=self)
+            self._render_buttons()
+            await inter.response.edit_message(embed=self.make_playing_embed(), view=self)
 
     async def cash_out(self, inter):
         if inter.user.id != self.user_id or self.game_over:
             return await inter.response.defer()
-        
+
         self.game_over = True
         win = int(self.bet * self.multiplier)
         add_point_value(self.user_id, win)
         if self.user_id in active_games:
             del active_games[self.user_id]
         last_settings[self.user_id] = {"bombs": self.bombs, "bet": self.bet}
-        
-        e = self.make_result_embed(
+
+        embed = self.make_result_embed(
             "💰 回収完了！",
             f"🔹 賭け：{self.bet:,}pt\n🔹 倍率：{self.multiplier}倍\n🔹 獲得：+{win:,}pt",
             0x2ECC71
         )
-        self._build_buttons()
-        self._build_end_buttons()
-        await inter.response.edit_message(embed=e, view=self)
+        self._render_buttons()
+        self._render_end_buttons()
+        await inter.response.edit_message(embed=embed, view=self)
+
 
 BOMBS_PER_PAGE = 8
 
@@ -237,6 +242,7 @@ class BombsSelectView(discord.ui.View):
             e.add_field(name="選択中", value=f"**{selected}個**", inline=False)
         return e
 
+
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -258,9 +264,9 @@ class MinesStartPanelView(discord.ui.View):
         uid = inter.user.id
         if uid in active_games:
             return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
-        
+
         bal = get_point_value(uid)
-        
+
         class BetInputModal(discord.ui.Modal, title="💎 賭け額を入力"):
             amount = discord.ui.TextInput(
                 label=f"保有ポイント：{bal:,}pt",
@@ -274,11 +280,11 @@ class MinesStartPanelView(discord.ui.View):
                     return await m.response.send_message("❌ 数字を入力してください", ephemeral=True)
                 if val <= 0 or val > bal:
                     return await m.response.send_message(f"❌ ポイントが足りません\n保有：{bal:,}pt", ephemeral=True)
-                
+
                 user_state[uid] = {"bet": val, "selected_bombs": None, "page": 0}
                 view = BombsSelectView(uid)
                 await m.response.send_message(embed=view.get_embed(uid), view=view, ephemeral=True)
-        
+
         await inter.response.send_modal(BetInputModal())
 
     @discord.ui.button(label="💰 ポイント確認", style=discord.ButtonStyle.secondary, row=2, custom_id="mine:panel_check_point")
@@ -292,7 +298,7 @@ class MinesStartPanelView(discord.ui.View):
             return await inter.response.send_message("❌ オーナー専用です", ephemeral=True)
         class EditModal(discord.ui.Modal, title="📝 パネル編集"):
             t = discord.ui.TextInput(label="タイトル", default="💎 マインス 💣", required=True, max_length=30)
-            d = discord.ui.TextInput(label="説明文", 
+            d = discord.ui.TextInput(label="説明文",
                 default="下のボタンから難易度を選択してゲームを開始できます！\n✅ かんたん [3個] ｜ ⚪ ふつう [5個] ｜ 🔴 むずかしい [8個] ｜ ⚙️ 自分で設定",
                 required=True, style=discord.TextStyle.long)
             async def on_submit(s, m):
@@ -316,8 +322,9 @@ class MinesStartPanelView(discord.ui.View):
                     return await m.response.send_message(f"❌ ポイントが足りません\n保有：{bal:,}pt", ephemeral=True)
                 game = MinesGameView(uid, bombs, val)
                 active_games[uid] = game
-                await m.response.send_message(embed=game.make_embed(), view=game, ephemeral=True)
+                await m.response.send_message(embed=game.make_playing_embed(), view=game, ephemeral=True)
         await inter.response.send_modal(BetModal())
+
 
 async def start_retry(user_id, inter):
     if user_id in active_games:
@@ -330,7 +337,8 @@ async def start_retry(user_id, inter):
         return await inter.response.send_message(f"❌ ポイントが足りません\n賭け額：{setting['bet']:,}pt\n保有：{bal:,}pt", ephemeral=True)
     game = MinesGameView(user_id, setting["bombs"], setting["bet"])
     active_games[user_id] = game
-    await inter.response.edit_message(embed=game.make_embed(), view=game)
+    await inter.response.edit_message(embed=game.make_playing_embed(), view=game)
+
 
 async def setup(tree: app_commands.CommandTree, bot=None):
     if bot is None:
@@ -422,7 +430,7 @@ async def setup(tree: app_commands.CommandTree, bot=None):
                 game = MinesGameView(uid, state["selected_bombs"], state["bet"])
                 active_games[uid] = game
                 del user_state[uid]
-                await inter.response.send_message(embed=game.make_embed(), view=game, ephemeral=True)
+                await inter.response.send_message(embed=game.make_playing_embed(), view=game, ephemeral=True)
 
             elif cid.startswith("mine:cell:"):
                 _, _, uid_str, idx_str = parts
