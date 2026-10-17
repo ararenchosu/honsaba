@@ -219,7 +219,7 @@ async def setup(tree, bot):
         bot._mines_views_ready = True
         print("✅ mines_panel 永久View登録完了")
 
-    @tree.command(name="minesパネル設置", description="💎 マインス パネルを設置")
+        @tree.command(name="マインズパネル設置", description="💎 マインス パネルを設置")
     @app_commands.check(is_owner)
     async def setup_panel(inter):
         e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
