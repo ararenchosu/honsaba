@@ -96,6 +96,7 @@ async def on_ready():
     print(f"✅ ログイン：{bot_main.user}")
     
     last_reason = get_and_clear_reason()
+    
     def check_view_no_args(view_class, view_name: str):
         try:
             instance = view_class()
@@ -224,7 +225,7 @@ async def on_close():
         set_reason("update")
 
 # ==================================================
-# 🔵 Bot2：サブBot — ✅ マインス追加
+# 🔵 Bot2：サブBot — ✅ マインス追加 & check_view_no_args 追加
 # ==================================================
 TOKEN_SUB = os.getenv("DISCORD_TOKEN_SUB")
 bot_sub = None
@@ -243,7 +244,19 @@ if TOKEN_SUB:
         print(f"\n========== サブBot 起動 ==========")
         print(f"✅ ログイン：{bot_sub.user}")
 
+        # ✅ サブBot用：引数チェック関数
+        def check_view_no_args(view_class, view_name: str):
+            try:
+                instance = view_class()
+                if instance.timeout is not None:
+                    print(f"   ⚠️ 【{view_name}】: timeout が None になっていません")
+                return instance
+            except TypeError as e:
+                print(f"   ❌ 【{view_name}】: 引数が必要 → {e}")
+                return None
+
         print("\n🔍 サブBot View 永続化チェック & 登録中...")
+        all_ok_sub = True
         try:
             from features.mines_panel import MinesStartPanelView, BombsSelectView
             views_to_register_sub = [
@@ -255,7 +268,12 @@ if TOKEN_SUB:
                 if instance:
                     bot_sub.add_view(instance)
                     print(f"   ✅ {name}")
-            print("✅ サブBot 全View 永続登録完了 ✨")
+                else:
+                    all_ok_sub = False
+            if all_ok_sub:
+                print("✅ サブBot 全View 永続登録完了 ✨")
+            else:
+                print("⚠️ サブBot：上記の❌ を修正して再起動してください")
         except Exception as e:
             print(f"❌ サブBot View登録エラー: {e}")
             import traceback
