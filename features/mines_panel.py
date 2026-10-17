@@ -7,7 +7,7 @@ from core.common import is_owner
 
 JST = timezone(timedelta(hours=9))
 DATA_FILE = "kn_points_data.json"
-MINES_CATEGORY_ID = None  # 特定のカテゴリにまとめたい場合はIDを入れる
+MINES_CATEGORY_ID = 1558467161146663023  # 特定のカテゴリにまとめたい場合はIDを入れる
 
 def load_points_all():
     if not os.path.exists(DATA_FILE):
