@@ -122,8 +122,8 @@ def load_history(user_id=None):
 
 def save_history_entry(entry):
     all_data = load_history()
-    all_data.insert(0, entry)  # 新しい順
-    all_data = all_data[:200]   # 最大200件まで保持
+    all_data.insert(0, entry)
+    all_data = all_data[:200]
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
 
@@ -141,11 +141,6 @@ def clear_history_user(user_id):
     all_data = [h for h in all_data if h.get("user_id") != user_id]
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
-    return True
-
-def clear_history_all():
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump([], f)
     return True
 
 FINAL_MULTIPLIER = {
@@ -440,7 +435,7 @@ class MinesResultView(discord.ui.View):
 # ===== ✅ 履歴表示・削除用View =====
 class HistoryView(discord.ui.View):
     def __init__(self, user_id, page=0):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)  # ✅ 永続化
         self.user_id = user_id
         self.page = page
         self.per_page = 5
@@ -454,6 +449,7 @@ class HistoryView(discord.ui.View):
         end = start + self.per_page
         page_items = self.history[start:end]
 
+        # 履歴項目ボタン
         for idx, item in enumerate(page_items):
             label = f"{start+idx+1}. {item['time']} | {item['bombs']}個"
             if item["result"] == "lose":
@@ -462,22 +458,44 @@ class HistoryView(discord.ui.View):
                 style = discord.ButtonStyle.primary
             else:
                 style = discord.ButtonStyle.green
-            btn = discord.ui.Button(label=label, style=style, row=idx)
+            # ✅ 動的にcustom_idを付与して永続化
+            btn = discord.ui.Button(
+                label=label, style=style, row=idx,
+                custom_id=f"history_del:{self.user_id}:{start+idx}"
+            )
             btn.callback = lambda i, idx_=start+idx: self.on_delete(i, idx_)
             self.add_item(btn)
 
-        prev_btn = discord.ui.Button(label="◀ 前", style=discord.ButtonStyle.secondary, disabled=self.page <= 0, row=5)
+        # 前へ
+        prev_btn = discord.ui.Button(
+            label="◀ 前", style=discord.ButtonStyle.secondary, row=5,
+            disabled=self.page <= 0,
+            custom_id=f"history_prev:{self.user_id}:{self.page}"
+        )
         prev_btn.callback = self.on_prev
         self.add_item(prev_btn)
 
-        page_label = discord.ui.Button(label=f"{self.page+1}/{self.total_pages}", style=discord.ButtonStyle.grey, disabled=True, row=5)
+        # ページ表示
+        page_label = discord.ui.Button(
+            label=f"{self.page+1}/{self.total_pages}",
+            style=discord.ButtonStyle.grey, disabled=True, row=5
+        )
         self.add_item(page_label)
 
-        next_btn = discord.ui.Button(label="次 ▶", style=discord.ButtonStyle.secondary, disabled=self.page+1 >= self.total_pages, row=5)
+        # 次へ
+        next_btn = discord.ui.Button(
+            label="次 ▶", style=discord.ButtonStyle.secondary, row=5,
+            disabled=self.page+1 >= self.total_pages,
+            custom_id=f"history_next:{self.user_id}:{self.page}"
+        )
         next_btn.callback = self.on_next
         self.add_item(next_btn)
 
-        clear_btn = discord.ui.Button(label="🗑️ 全履歴削除", style=discord.ButtonStyle.danger, row=6)
+        # 全削除
+        clear_btn = discord.ui.Button(
+            label="🗑️ 全履歴削除", style=discord.ButtonStyle.danger, row=6,
+            custom_id=f"history_clear:{self.user_id}"
+        )
         clear_btn.callback = self.on_clear
         self.add_item(clear_btn)
 
