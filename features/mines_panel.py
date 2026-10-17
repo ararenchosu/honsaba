@@ -64,7 +64,6 @@ class MinesGameView(discord.ui.View):
         self.opened_count = 0
         self.multiplier = 1.0
         self.game_over = False
-        self.reveal_all = False  # 全マス表示モード
         for p in random.sample(range(25), bombs):
             self.grid[p] = True
         self._build_buttons()
@@ -72,8 +71,7 @@ class MinesGameView(discord.ui.View):
     def _build_buttons(self):
         self.clear_items()
         for idx in range(25):
-            # ゲーム終了時は全マス表示
-            if self.game_over or self.reveal_all:
+            if self.game_over:
                 label = "💣" if self.grid[idx] else "💎"
                 style = discord.ButtonStyle.danger if self.grid[idx] else discord.ButtonStyle.success
                 disabled = True
@@ -89,7 +87,6 @@ class MinesGameView(discord.ui.View):
                 label=label, style=style, disabled=disabled,
                 custom_id=f"mine:cell:{self.user_id}:{idx}"
             ))
-        # ゲーム中は回収ボタン表示
         if not self.game_over and self.opened_count > 0:
             self.add_item(discord.ui.Button(
                 label="💰 回収", style=discord.ButtonStyle.primary, row=4,
@@ -98,17 +95,29 @@ class MinesGameView(discord.ui.View):
 
     def _build_end_buttons(self):
         self.clear_items()
-        # 同じ設定でもう1回
         if self.user_id in last_settings:
             self.add_item(discord.ui.Button(
                 label="🔄 同じ設定でもう1回", style=discord.ButtonStyle.primary, row=0,
                 custom_id=f"mine:retry:{self.user_id}"
             ))
-        # パネルに戻る
         self.add_item(discord.ui.Button(
             label="📋 パネルに戻る", style=discord.ButtonStyle.secondary, row=0,
             custom_id=f"mine:back_panel:{self.user_id}"
         ))
+
+    def make_board_text(self):
+        """5×5 マスの文字列作成"""
+        lines = []
+        for r in range(5):
+            line = ""
+            for c in range(5):
+                idx = r * 5 + c
+                if self.game_over or self.opened[idx]:
+                    line += "💣" if self.grid[idx] else "💎"
+                else:
+                    line += "⬜"
+            lines.append(" ".join(line))
+        return "\n".join(lines)
 
     def make_embed(self):
         if self.game_over:
@@ -119,6 +128,11 @@ class MinesGameView(discord.ui.View):
         e.add_field(name="🔹 現在倍率", value=f"**{self.multiplier}倍**", inline=True)
         return e
 
+    def make_result_embed(self, title, desc, color):
+        e = discord.Embed(title=title, description=desc, color=color)
+        e.add_field(name="🎯 盤面", value=self.make_board_text(), inline=False)
+        return e
+
     async def open_cell(self, inter, idx):
         if inter.user.id != self.user_id or self.game_over:
             return await inter.response.defer()
@@ -126,21 +140,23 @@ class MinesGameView(discord.ui.View):
         self.opened[idx] = True
         
         if self.grid[idx]:
-            # 爆弾を引いた → ゲームオーバー・全マス表示
+            # 爆弾：全マス表示＋結果ボタン
             self.game_over = True
-            self.reveal_all = True
             add_point_value(self.user_id, -self.bet)
             if self.user_id in active_games:
                 del active_games[self.user_id]
             last_settings[self.user_id] = {"bombs": self.bombs, "bet": self.bet}
-            e = discord.Embed(title="💣 爆弾！",
-                description=f"🔹 賭け：{self.bet:,}pt\n🔹 結果：-{self.bet:,}pt",
-                color=0xE74C3C)
-            self._build_buttons()    # 全マスをめくって表示
-            self._build_end_buttons() # 再挑戦・戻るボタン
+            
+            e = self.make_result_embed(
+                "💣 爆弾！",
+                f"🔹 賭け：{self.bet:,}pt\n🔹 結果：-{self.bet:,}pt",
+                0xE74C3C
+            )
+            self._build_buttons()
+            self._build_end_buttons()
             await inter.response.edit_message(embed=e, view=self)
         else:
-            # 当たりマス
+            # 当たり：表示更新
             self.opened_count += 1
             self.multiplier = calc_step_multiplier(self.bombs, self.opened_count)
             self._build_buttons()
@@ -149,19 +165,21 @@ class MinesGameView(discord.ui.View):
     async def cash_out(self, inter):
         if inter.user.id != self.user_id or self.game_over:
             return await inter.response.defer()
-        # 回収 → ゲーム終了・全マス表示
+        
         self.game_over = True
-        self.reveal_all = True
         win = int(self.bet * self.multiplier)
         add_point_value(self.user_id, win)
         if self.user_id in active_games:
             del active_games[self.user_id]
         last_settings[self.user_id] = {"bombs": self.bombs, "bet": self.bet}
-        e = discord.Embed(title="💰 回収完了！",
-            description=f"🔹 賭け：{self.bet:,}pt\n🔹 倍率：{self.multiplier}倍\n🔹 獲得：+{win:,}pt",
-            color=0x2ECC71)
-        self._build_buttons()    # 全マスをめくって表示
-        self._build_end_buttons() # 再挑戦・戻るボタン
+        
+        e = self.make_result_embed(
+            "💰 回収完了！",
+            f"🔹 賭け：{self.bet:,}pt\n🔹 倍率：{self.multiplier}倍\n🔹 獲得：+{win:,}pt",
+            0x2ECC71
+        )
+        self._build_buttons()
+        self._build_end_buttons()
         await inter.response.edit_message(embed=e, view=self)
 
 BOMBS_PER_PAGE = 8
