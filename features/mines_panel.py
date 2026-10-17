@@ -458,19 +458,14 @@ class HistoryView(discord.ui.View):
                 style = discord.ButtonStyle.primary
             else:
                 style = discord.ButtonStyle.green
-            # ✅ 動的にcustom_idを付与して永続化
-            btn = discord.ui.Button(
-                label=label, style=style, row=idx,
-                custom_id=f"history_del:{self.user_id}:{start+idx}"
-            )
+            btn = discord.ui.Button(label=label, style=style, row=idx)
             btn.callback = lambda i, idx_=start+idx: self.on_delete(i, idx_)
             self.add_item(btn)
 
         # 前へ
         prev_btn = discord.ui.Button(
             label="◀ 前", style=discord.ButtonStyle.secondary, row=5,
-            disabled=self.page <= 0,
-            custom_id=f"history_prev:{self.user_id}:{self.page}"
+            disabled=self.page <= 0
         )
         prev_btn.callback = self.on_prev
         self.add_item(prev_btn)
@@ -485,16 +480,14 @@ class HistoryView(discord.ui.View):
         # 次へ
         next_btn = discord.ui.Button(
             label="次 ▶", style=discord.ButtonStyle.secondary, row=5,
-            disabled=self.page+1 >= self.total_pages,
-            custom_id=f"history_next:{self.user_id}:{self.page}"
+            disabled=self.page+1 >= self.total_pages
         )
         next_btn.callback = self.on_next
         self.add_item(next_btn)
 
         # 全削除
         clear_btn = discord.ui.Button(
-            label="🗑️ 全履歴削除", style=discord.ButtonStyle.danger, row=6,
-            custom_id=f"history_clear:{self.user_id}"
+            label="🗑️ 全履歴削除", style=discord.ButtonStyle.danger, row=6
         )
         clear_btn.callback = self.on_clear
         self.add_item(clear_btn)
@@ -546,21 +539,21 @@ class HistoryView(discord.ui.View):
 
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=None)  # ✅ 絶対押せるように
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v6_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v7_easy")
     async def easy(self, inter, btn):
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v6_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v7_normal")
     async def normal(self, inter, btn):
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v6_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v7_hard")
     async def hard(self, inter, btn):
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v6_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v7_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
@@ -592,7 +585,7 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetInputModal())
 
-    @discord.ui.button(label="📋 履歴・削除", style=discord.ButtonStyle.primary, row=2, custom_id="mine_v6_history")
+    @discord.ui.button(label="📋 履歴・削除", style=discord.ButtonStyle.primary, row=2, custom_id="mine_v7_history")
     async def history(self, inter, btn):
         uid = inter.user.id
         view = HistoryView(uid)
@@ -648,4 +641,5 @@ async def start_game(user, guild, bombs, bet):
         raise Exception(f"メッセージ送信失敗：{e}")
 
 async def setup(tree, bot):
-    pass
+    # ✅ 永続View登録
+    bot.add_view(MinesStartPanelView())
