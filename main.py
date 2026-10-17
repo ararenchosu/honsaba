@@ -50,8 +50,8 @@ intents_main.members = True
 bot_main = discord.Client(intents=intents_main)
 tree_main = app_commands.CommandTree(bot_main)
 
-# 重複実行防止用フラグ
-bot_main._ready_executed = False
+# 重複実行防止：最初に1回だけ実行させる
+bot_main._ready_done = False
 
 def get_jst_now():
     return datetime.now(JST)
@@ -96,10 +96,11 @@ async def on_message(message):
 
 @bot_main.event
 async def on_ready():
-    # 重複実行を完全にブロック
-    if bot_main._ready_executed:
+    # ===== 最優先：2回目以降は即終了 =====
+    if bot_main._ready_done:
         return
-    bot_main._ready_executed = True
+    bot_main._ready_done = True
+    # ==================================
 
     print(f"\n========== メインBot 起動 ==========")
     print(f"✅ ログイン：{bot_main.user}")
@@ -214,41 +215,39 @@ async def on_ready():
     await voice_panel.setup(tree_main, bot_main); print("  ✅ voice_panel")
     await ranking_panel.setup(tree_main, bot_main); print("  ✅ ranking_panel")
     await elevator_panel.setup(tree_main, bot_main); print("  ✅ elevator_panel")
-    
-    # mines_panel は実行しても止まらないように先に実行
-    await mines_panel.setup(tree_main, bot_main)
-    print("  ✅ mines_panel")
+    await mines_panel.setup(tree_main, bot_main); print("  ✅ mines_panel")
 
-    # ✅ マインス コマンドを絶対に登録（ここが核心！）
+    # ==============================================
+    # ✅ マインスコマンド：絶対にここで登録
+    # ==============================================
     @tree_main.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")
-    async def cmd_mine_panel(inter: discord.Interaction):
+    async def mine_panel_cmd(inter: discord.Interaction):
         if not is_owner(inter):
             await inter.response.send_message("❌ オーナー専用です", ephemeral=True)
             return
         from features.mines_panel import MinesStartPanelView
-        embed = discord.Embed(
+        em = discord.Embed(
             title="💎 マインス 💣",
             description=(
-                "下のボタンから難易度を選んでゲームを始められます！\n"
+                "下のボタンから難易度を選択してゲームを開始できます！\n"
                 "✅ かんたん [3個] ｜ ⚪ ふつう [5個] ｜ 🔴 むずかしい [8個] ｜ ⚙️ 自分で設定"
             ),
             color=0x1a1a1a
         )
-        await inter.response.send_message(embed=embed, view=MinesStartPanelView())
-        await inter.followup.send("✅ マインスパネル設置完了", ephemeral=True)
+        await inter.response.send_message(embed=em, view=MinesStartPanelView())
+        await inter.followup.send("✅ パネル設置完了", ephemeral=True)
 
-    print("  ✅ マインスコマンド 直接登録完了")
+    print("  ✅ マインスコマンド → 登録完了！")
     print("✅ メインBot 全コマンド登録完了")
     
-    print("\n🔄 メインBot グローバル同期中...")
-    synced_main = await tree_main.sync()
-    print(f"✅ メインBot 同期完了！合計 {len(synced_main)} 件")
+    print("\n🔄 グローバル同期中...")
+    synced = await tree_main.sync()
+    print(f"✅ 同期完了！合計 {len(synced)} 件")
     
     print("\n🔄 自動更新タスク起動中...")
     asyncio.create_task(ranking_panel.auto_update_task(bot_main))
     print("✅ ランキング自動更新タスク起動完了")
     
-    # ✅ 起動ログ送信
     if last_reason == "restart_button":
         await send_status_embed(bot_main, "✅ 再起動完了",
             "ボタン操作により再起動されました。\n全パネル復旧済みです✨", 0xF39C12)
@@ -278,13 +277,13 @@ if TOKEN_SUB:
     bot_sub = discord.Client(intents=intents_sub)
     tree_sub = app_commands.CommandTree(bot_sub)
     
-    bot_sub._ready_executed = False
+    bot_sub._ready_done = False
     
     @bot_sub.event
     async def on_ready():
-        if bot_sub._ready_executed:
+        if bot_sub._ready_done:
             return
-        bot_sub._ready_executed = True
+        bot_sub._ready_done = True
         print(f"\n========== サブBot 起動 ==========")
         print(f"✅ ログイン：{bot_sub.user}")
         print("✅ サブBot 準備完了\n")
