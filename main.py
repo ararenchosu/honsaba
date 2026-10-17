@@ -28,14 +28,14 @@ import features.welcome_leave as welcome_leave
 import features.voice_channel_panel as voice_panel
 import features.ranking_panel as ranking_panel
 import features.elevator_panel as elevator_panel
-# ✅ マインス（サブBot用）
+# ✅ マインス（メインBotからコマンド登録）
 import features.mines_panel as mines_panel
 from core.common import is_owner
 
 JST = timezone(timedelta(hours=9))
 STATUS_LOG_CHANNEL_ID = 1559119439981449256
 REASON_FILE = ".last_stop_reason"
-MINES_GUILD_ID = 1542788841465978880  # ✅ マインス設置サーバー
+MINES_GUILD_ID = 1542788841465978880
 
 # ==================================================
 # 🔴 Bot1：メインBot
@@ -128,6 +128,7 @@ async def on_ready():
         from features.backup_panel import BackupPanelView, RestoreConfirmView
         from features.command_list_panel import CommandListView
         from features.elevator_panel import ElevatorView
+        from features.mines_panel import MinesStartPanelView, BombsSelectView
 
         views_to_register_main = [
             (LotteryPanelView, "LotteryPanelView"),
@@ -155,6 +156,8 @@ async def on_ready():
             (voice_panel.VoiceCreatePanelView, "VoiceCreatePanelView"),
             (ranking_panel.RankingPanelView, "RankingPanelView"),
             (ElevatorView, "ElevatorView"),
+            (MinesStartPanelView, "MinesStartPanelView"),
+            (BombsSelectView, "BombsSelectView"),
         ]
         for view_cls, name in views_to_register_main:
             instance = check_view_no_args(view_cls, name)
@@ -202,6 +205,8 @@ async def on_ready():
     await voice_panel.setup(tree_main, bot_main); print("  ✅ voice_panel")
     await ranking_panel.setup(tree_main, bot_main); print("  ✅ ranking_panel")
     await elevator_panel.setup(tree_main, bot_main); print("  ✅ elevator_panel")
+    # ✅ 他と同じ形式でマインス追加
+    await mines_panel.setup(tree_main, bot_main); print("  ✅ mines_panel")
     print("✅ メインBot 全コマンド登録完了")
 
     print("\n🔄 メインBot グローバル同期中...")
@@ -227,7 +232,7 @@ async def on_close():
         set_reason("update")
 
 # ==================================================
-# 🔵 Bot2：サブBot — ✅ マインス専用
+# 🔵 Bot2：サブBot — Viewのみ登録
 # ==================================================
 TOKEN_SUB = os.getenv("DISCORD_TOKEN_SUB")
 bot_sub = None
@@ -240,7 +245,6 @@ if TOKEN_SUB:
     intents_sub.members = True
     bot_sub = discord.Client(intents=intents_sub)
     tree_sub = app_commands.CommandTree(bot_sub)
-    GUILD_OBJ = discord.Object(id=MINES_GUILD_ID)
 
     @bot_sub.event
     async def on_ready():
@@ -281,37 +285,7 @@ if TOKEN_SUB:
             import traceback
             traceback.print_exc()
 
-        print("\n🔄 サブBot コマンド登録中...")
-        # ✅ mines_panel.setup 呼び出し
-        await mines_panel.setup(tree_sub, bot_sub)
-        print("  ✅ mines_panel")
-
-        # ✅ main.py側から直接サーバー限定コマンドを再登録（最終手段）
-        @tree_sub.command(
-            name="マインズパネル設置",
-            description="💎 マインス パネルを設置",
-            guild=GUILD_OBJ
-        )
-        @app_commands.check(is_owner)
-        async def mines_panel_direct(inter):
-            from features.mines_panel import MinesStartPanelView
-            e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
-            e.description = (
-                "爆弾を避けて金塊を集め、好きなタイミングで回収！\n"
-                "────────────────────────────\n"
-                "✅ かんたん  [3個]  約15.7倍\n"
-                "⚪ ふつう    [5個]  約32.9倍\n"
-                "🔴 むずかしい [8個]  約96.3倍\n"
-                "⚙️ 自分で設定 [1～24個]"
-            )
-            await inter.response.send_message(embed=e, view=MinesStartPanelView())
-
-        # ✅ サーバーに直接同期 → 即時反映
-        synced_guild = await tree_sub.sync(guild=GUILD_OBJ)
-        print(f"✅ サーバー限定同期完了 → {len(synced_guild)}件")
-
-        print("✅ サブBot 全コマンド登録完了")
-        print("✅ サブBot 準備完了\n")
+        print("✅ サブBot 準備完了（コマンドはメイン側で登録）\n")
 else:
     print("⚠️ 環境変数 DISCORD_TOKEN_SUB が未設定 → サブBotは起動しません")
 
