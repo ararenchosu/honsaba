@@ -28,14 +28,12 @@ import features.welcome_leave as welcome_leave
 import features.voice_channel_panel as voice_panel
 import features.ranking_panel as ranking_panel
 import features.elevator_panel as elevator_panel
-# ✅ マインス（メインBotからコマンド登録）
-import features.mines_panel as mines_panel
+import features.mines_panel as mines_panel  # ✅ マインス
 from core.common import is_owner
 
 JST = timezone(timedelta(hours=9))
 STATUS_LOG_CHANNEL_ID = 1559119439981449256
 REASON_FILE = ".last_stop_reason"
-MINES_GUILD_ID = 1542788841465978880
 
 # ==================================================
 # 🔴 Bot1：メインBot
@@ -45,6 +43,7 @@ if not TOKEN_MAIN:
     print("❌ 環境変数 DISCORD_TOKEN が設定されていません")
     exit(1)
 print(f"✅ メイントークン読み込み完了：{TOKEN_MAIN[:10]}...")
+
 intents_main = discord.Intents.default()
 intents_main.message_content = True
 intents_main.members = True
@@ -128,8 +127,8 @@ async def on_ready():
         from features.backup_panel import BackupPanelView, RestoreConfirmView
         from features.command_list_panel import CommandListView
         from features.elevator_panel import ElevatorView
-        from features.mines_panel import MinesStartPanelView, BombsSelectView
-
+        from features.mines_panel import MinesStartPanelView, BombsSelectView  # ✅ マインス
+        
         views_to_register_main = [
             (LotteryPanelView, "LotteryPanelView"),
             (PointCheckPanelView, "PointCheckPanelView"),
@@ -156,9 +155,10 @@ async def on_ready():
             (voice_panel.VoiceCreatePanelView, "VoiceCreatePanelView"),
             (ranking_panel.RankingPanelView, "RankingPanelView"),
             (ElevatorView, "ElevatorView"),
-            (MinesStartPanelView, "MinesStartPanelView"),
-            (BombsSelectView, "BombsSelectView"),
+            (MinesStartPanelView, "MinesStartPanelView"),  # ✅ マインス
+            (BombsSelectView, "BombsSelectView"),          # ✅ マインス
         ]
+        
         for view_cls, name in views_to_register_main:
             instance = check_view_no_args(view_cls, name)
             if instance:
@@ -166,16 +166,17 @@ async def on_ready():
                 print(f"   ✅ {name}")
             else:
                 all_ok_main = False
-
+        
         clv = CommandListView()
         clv.tree = tree_main
         bot_main.add_view(clv)
         print("   ✅ CommandListView")
-
+        
         if all_ok_main:
             print("✅ メインBot 全View 永続登録完了 ✨")
         else:
             print("⚠️ メインBot：上記の❌ を修正して再起動してください")
+            
     except Exception as e:
         print(f"❌ メインBot View登録エラー: {e}")
         import traceback
@@ -205,21 +206,22 @@ async def on_ready():
     await voice_panel.setup(tree_main, bot_main); print("  ✅ voice_panel")
     await ranking_panel.setup(tree_main, bot_main); print("  ✅ ranking_panel")
     await elevator_panel.setup(tree_main, bot_main); print("  ✅ elevator_panel")
-    # ✅ 他と同じ形式でマインス追加
-    await mines_panel.setup(tree_main, bot_main); print("  ✅ mines_panel")
-    print("✅ メインBot 全コマンド登録完了")
+    await mines_panel.setup(tree_main, bot_main); print("  ✅ mines_panel")  # ✅ マインス
 
+    print("✅ メインBot 全コマンド登録完了")
+    
     print("\n🔄 メインBot グローバル同期中...")
     synced_main = await tree_main.sync()
     print(f"✅ メインBot 同期完了！合計 {len(synced_main)} 件")
-
+    
     print("\n🔄 自動更新タスク起動中...")
     asyncio.create_task(ranking_panel.auto_update_task(bot_main))
     print("✅ ランキング自動更新タスク起動完了")
-
+    
+    # ✅ 起動ログ送信
     if last_reason == "restart_button":
         await send_status_embed(bot_main, "✅ 再起動完了",
-            "ボタン操作により再起動されました。\n全パネル復旧済みです✨", 0xF39C12)
+            "ボタン操作により再起動されました。\n全パネル復旧済みです復旧済みです✨", 0xF39C12)
     else:
         await send_status_embed(bot_main, "🔄 起動完了",
             "機能追加・更新により起動しました。\n全パネル復旧済みです✨", 0x9B59B6)
@@ -232,7 +234,7 @@ async def on_close():
         set_reason("update")
 
 # ==================================================
-# 🔵 Bot2：サブBot — Viewのみ登録
+# 🔵 Bot2：サブBot — マインス関連を削除
 # ==================================================
 TOKEN_SUB = os.getenv("DISCORD_TOKEN_SUB")
 bot_sub = None
@@ -245,47 +247,12 @@ if TOKEN_SUB:
     intents_sub.members = True
     bot_sub = discord.Client(intents=intents_sub)
     tree_sub = app_commands.CommandTree(bot_sub)
-
+    
     @bot_sub.event
     async def on_ready():
         print(f"\n========== サブBot 起動 ==========")
         print(f"✅ ログイン：{bot_sub.user}")
-
-        def check_view_no_args(view_class, view_name: str):
-            try:
-                instance = view_class()
-                if instance.timeout is not None:
-                    print(f"   ⚠️ 【{view_name}】: timeout が None になっていません")
-                return instance
-            except TypeError as e:
-                print(f"   ❌ 【{view_name}】: 引数が必要 → {e}")
-                return None
-
-        print("\n🔍 サブBot View 永続化チェック & 登録中...")
-        all_ok_sub = True
-        try:
-            from features.mines_panel import MinesStartPanelView, BombsSelectView
-            views_to_register_sub = [
-                (MinesStartPanelView, "MinesStartPanelView"),
-                (BombsSelectView, "BombsSelectView"),
-            ]
-            for view_cls, name in views_to_register_sub:
-                instance = check_view_no_args(view_cls, name)
-                if instance:
-                    bot_sub.add_view(instance)
-                    print(f"   ✅ {name}")
-                else:
-                    all_ok_sub = False
-            if all_ok_sub:
-                print("✅ サブBot 全View 永続登録完了 ✨")
-            else:
-                print("⚠️ サブBot：上記の❌ を修正して再起動してください")
-        except Exception as e:
-            print(f"❌ サブBot View登録エラー: {e}")
-            import traceback
-            traceback.print_exc()
-
-        print("✅ サブBot 準備完了（コマンドはメイン側で登録）\n")
+        print("✅ サブBot 準備完了（マインスはメイン側へ移行済み）\n")
 else:
     print("⚠️ 環境変数 DISCORD_TOKEN_SUB が未設定 → サブBotは起動しません")
 
