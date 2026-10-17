@@ -9,7 +9,6 @@ JST = timezone(timedelta(hours=9))
 DATA_FILE = "kn_points_data.json"
 MINES_CATEGORY_ID = 1558467161146663023
 
-# ===== ポイント読み書き =====
 def load_points_all():
     if not os.path.exists(DATA_FILE):
         return {"points": {}}
@@ -111,7 +110,6 @@ async def create_game_channel(guild: discord.Guild, user: discord.User):
     if not category:
         raise ValueError(f"カテゴリが見つかりません: {MINES_CATEGORY_ID}")
     
-    # ✅ チャンネル作成者＝ユーザーにしてBotも確実に送れる設定
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         user: discord.PermissionOverwrite(
@@ -147,6 +145,7 @@ class MinesPlayingView(discord.ui.View):
     def _build_buttons(self):
         self.clear_items()
         g = self.game
+        # 5×5 盤面ボタンだけ表示
         for idx in range(25):
             if g.opened[idx]:
                 lbl = "💣" if g.grid[idx] else "💎"
@@ -160,15 +159,11 @@ class MinesPlayingView(discord.ui.View):
             btn.callback = lambda i, idx=idx: self.on_click(i, idx)
             self.add_item(btn)
         
-        can_end = g.opened_count > 0
-        end_btn = discord.ui.Button(
-            label="💰 この倍率で終了",
-            style=discord.ButtonStyle.primary if can_end else discord.ButtonStyle.secondary,
-            disabled=not can_end,
-            row=4
-        )
-        end_btn.callback = self.on_end
-        self.add_item(end_btn)
+        # ✅ 確認用：終了ボタンは一旦コメントアウト
+        # can_end = g.opened_count > 0
+        # end_btn = discord.ui.Button(label="💰 この倍率で終了", ...)
+        # end_btn.callback = self.on_end
+        # self.add_item(end_btn)
 
     async def interaction_check(self, inter):
         return inter.user.id == self.game.user_id
@@ -189,19 +184,6 @@ class MinesPlayingView(discord.ui.View):
             g.opened_count += 1
             g.multiplier = calc_step_multiplier(g.bombs, g.opened_count)
             await inter.response.edit_message(embed=g.playing_embed(), view=MinesPlayingView(g))
-
-    async def on_end(self, inter):
-        g = self.game
-        if g.game_over or g.opened_count == 0:
-            return await inter.response.defer()
-        g.game_over = True
-        win = int(g.bet * g.multiplier)
-        add_point_value(g.user_id, win)
-        last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
-        game_states.pop(g.user_id, None)
-        embed = g.result_embed("💰 回収完了！",
-            f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{g.multiplier}倍\n🔹 獲得：+{win:,}pt", 0x2ECC71)
-        await inter.response.edit_message(embed=embed, view=MinesResultView(g))
 
 class MinesResultView(discord.ui.View):
     def __init__(self, game: MinesGame):
@@ -251,8 +233,7 @@ class MinesResultView(discord.ui.View):
                 new_game.message = old_msg
                 message_map[uid] = old_msg
                 await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
-            except Exception as e:
-                # 編集失敗 → 新規送信
+            except Exception:
                 try:
                     new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
                     new_game.message = new_msg
@@ -261,7 +242,7 @@ class MinesResultView(discord.ui.View):
                 except Exception as e2:
                     game_states.pop(uid, None)
                     await inter.response.send_message(
-                        f"❌ メッセージ送信失敗：{e2}\nカテゴリの権限を確認してください", ephemeral=True)
+                        f"❌ メッセージ送信失敗：{e2}\nカテゴリ権限で「メッセージを送信」をオンにしてください", ephemeral=True)
         else:
             try:
                 new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
@@ -360,7 +341,6 @@ class MinesStartPanelView(discord.ui.View):
 
 async def start_game(user, guild, bombs, bet):
     uid = user.id
-    # ✅ 古い状態を強制クリア
     game_states.pop(uid, None)
     
     channel = channel_map.get(uid)
@@ -378,9 +358,8 @@ async def start_game(user, guild, bombs, bet):
         game.message = msg
         message_map[uid] = msg
     except Exception as e:
-        # ✅ 送信失敗 → 状態を消して明確に失敗を伝える
         game_states.pop(uid, None)
-        raise Exception(f"チャンネル作成OK → メッセージ送信失敗：{e}\nカテゴリの権限で「メッセージを送信」をオンにしてください")
+        raise Exception(f"メッセージ送信失敗：{e}\n→ カテゴリ権限で「メッセージを送信」オンにしてください")
 
 async def setup(tree, bot):
     pass
