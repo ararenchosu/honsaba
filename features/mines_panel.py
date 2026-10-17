@@ -7,17 +7,14 @@ from core.common import is_owner
 
 JST = timezone(timedelta(hours=9))
 DATA_FILE = "kn_points_data.json"
-MINES_CATEGORY_ID = 1558467161146663023  # カテゴリを指定したい場合はこにIDを入れる (例: 1234567890)
+MINES_CATEGORY_ID = 1558467161146663023  # 特定のカテゴリにまとめたい場合はIDを入れる
 
 def load_points_all():
     if not os.path.exists(DATA_FILE):
         return {"points": {}}
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         import json
-        data = json.load(f)
-        if "points" not in data:
-            return {"points": data}
-        return data
+        return json.load(f)
 
 def save_points_all(data):
     import json
@@ -100,10 +97,7 @@ class MinesGame:
         return e
 
 async def create_game_channel(guild: discord.Guild, user: discord.User):
-    category = None
-    if MINES_CATEGORY_ID:
-        category = guild.get_channel(MINES_CATEGORY_ID)
-    
+    category = guild.get_channel(MINES_CATEGORY_ID) if MINES_CATEGORY_ID else None
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         user: discord.PermissionOverwrite(read_messages=True, send_messages=False),
@@ -112,106 +106,129 @@ async def create_game_channel(guild: discord.Guild, user: discord.User):
     for m in guild.members:
         if m.guild_permissions.administrator:
             overwrites[m] = discord.PermissionOverwrite(read_messages=True)
-    
     channel = await guild.create_text_channel(
         name=f"マインズ-{user.name}",
         category=category,
         overwrites=overwrites,
-        reason="マインズゲーム用チャンネル"
+        reason="マインズゲーム用"
     )
     return channel
 
+# ========== ゲーム中View — ここに処理を全部書く ==========
 class MinesPlayingView(discord.ui.View):
     def __init__(self, game: MinesGame):
         super().__init__(timeout=None)
-        uid = game.user_id
+        self.game = game
+        self._build_buttons()
+
+    def _build_buttons(self):
+        self.clear_items()
+        g = self.game
         for idx in range(25):
-            if game.opened[idx]:
-                label = "💣" if game.grid[idx] else "💎"
-                style = discord.ButtonStyle.danger if game.grid[idx] else discord.ButtonStyle.success
+            if g.opened[idx]:
+                lbl = "💣" if g.grid[idx] else "💎"
+                style = discord.ButtonStyle.danger if g.grid[idx] else discord.ButtonStyle.success
                 disabled = True
             else:
-                label = "□"
+                lbl = "□"
                 style = discord.ButtonStyle.secondary
                 disabled = False
-            self.add_item(discord.ui.Button(
-                label=label, style=style, disabled=disabled,
-                custom_id=f"mine:cell:{uid}:{idx}"
-            ))
-        if game.opened_count > 0:
-            self.add_item(discord.ui.Button(
-                label="💰 回収", style=discord.ButtonStyle.primary, row=4,
-                custom_id=f"mine:cash:{uid}"
-            ))
+            btn = discord.ui.Button(label=lbl, style=style, disabled=disabled, row=idx//5)
+            btn.callback = lambda i, idx=idx: self.on_click(i, idx)
+            self.add_item(btn)
+        if g.opened_count > 0:
+            cash_btn = discord.ui.Button(label="💰 回収", style=discord.ButtonStyle.primary, row=4)
+            cash_btn.callback = self.on_cash
+            self.add_item(cash_btn)
 
+    async def interaction_check(self, inter):
+        return inter.user.id == self.game.user_id
+
+    async def on_click(self, inter, idx):
+        g = self.game
+        if g.game_over or g.opened[idx]:
+            return await inter.response.defer()
+
+        g.opened[idx] = True
+
+        if g.grid[idx]:
+            # 爆弾
+            g.game_over = True
+            add_point_value(g.user_id, -g.bet)
+            last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
+            embed = g.result_embed(
+                "💣 爆弾！",
+                f"🔹 賭け：{g.bet:,}pt\n🔹 結果：-{g.bet:,}pt",
+                0xE74C3C
+            )
+            await inter.response.edit_message(embed=embed, view=MinesResultView(g))
+        else:
+            # 当たり
+            g.opened_count += 1
+            g.multiplier = calc_step_multiplier(g.bombs, g.opened_count)
+            await inter.response.edit_message(embed=g.playing_embed(), view=self)
+
+    async def on_cash(self, inter):
+        g = self.game
+        if g.game_over:
+            return await inter.response.defer()
+        g.game_over = True
+        win = int(g.bet * g.multiplier)
+        add_point_value(g.user_id, win)
+        last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
+        embed = g.result_embed(
+            "💰 回収完了！",
+            f"🔹 賭け：{g.bet:,}pt\n🔹 倍率：{g.multiplier}倍\n🔹 獲得：+{win:,}pt",
+            0x2ECC71
+        )
+        await inter.response.edit_message(embed=embed, view=MinesResultView(g))
+
+# ========== 結果View ==========
 class MinesResultView(discord.ui.View):
-    def __init__(self, user_id: int):
+    def __init__(self, game: MinesGame):
         super().__init__(timeout=None)
-        if user_id in last_settings:
-            self.add_item(discord.ui.Button(
-                label="🔄 同じ設定でもう1回", style=discord.ButtonStyle.primary, row=0,
-                custom_id=f"mine:retry:{user_id}"
-            ))
-        self.add_item(discord.ui.Button(
-            label="🗑️ このチャンネルを閉じる", style=discord.ButtonStyle.danger, row=0,
-            custom_id=f"mine:close:{user_id}"
-        ))
+        self.game = game
+        uid = game.user_id
+        if uid in last_settings:
+            retry_btn = discord.ui.Button(label="🔄 同じ設定でもう1回", style=discord.ButtonStyle.primary)
+            retry_btn.callback = self.on_retry
+            self.add_item(retry_btn)
+        close_btn = discord.ui.Button(label="🗑️ チャンネルを閉じる", style=discord.ButtonStyle.danger)
+        close_btn.callback = self.on_close
+        self.add_item(close_btn)
 
-BOMBS_PER_PAGE = 8
+    async def on_retry(self, inter):
+        if inter.user.id != self.game.user_id:
+            return await inter.response.defer()
+        if self.game.user_id in game_states:
+            return await inter.response.send_message("❌ 進行中です", ephemeral=True)
+        setting = last_settings.get(self.game.user_id)
+        if not setting:
+            return await inter.response.send_message("❌ 設定なし", ephemeral=True)
+        bal = get_point_value(self.game.user_id)
+        if setting["bet"] > bal:
+            return await inter.response.send_message(f"❌ ポイント不足", ephemeral=True)
+        
+        channel = await create_game_channel(inter.guild, inter.user)
+        new_game = MinesGame(inter.user, setting["bombs"], setting["bet"])
+        new_game.channel = channel
+        game_states[self.game.user_id] = new_game
+        temp_channels[self.game.user_id] = channel
+        
+        view = MinesPlayingView(new_game)
+        msg = await channel.send(embed=new_game.playing_embed(), view=view)
+        new_game.message = msg
+        await inter.response.send_message(f"✅ 新規チャンネル → {channel.mention}", ephemeral=True)
 
-class BombsSelectView(discord.ui.View):
-    def __init__(self, user_id=None):
-        super().__init__(timeout=None)
-        if user_id:
-            self._build_content(user_id)
+    async def on_close(self, inter):
+        if inter.user.id != self.game.user_id and not inter.user.guild_permissions.administrator:
+            return await inter.response.defer()
+        c = temp_channels.pop(self.game.user_id, None)
+        if c:
+            await c.delete(reason="終了")
+        await inter.response.send_message("✅ 閉じました", ephemeral=True)
 
-    def _build_content(self, user_id):
-        self.clear_items()
-        state = user_state.get(user_id, {})
-        page = state.get("page", 0)
-        selected = state.get("selected_bombs")
-        start = page * BOMBS_PER_PAGE + 1
-        end = min(24, start + BOMBS_PER_PAGE - 1)
-        for n in range(start, end + 1):
-            style = discord.ButtonStyle.primary if selected == n else discord.ButtonStyle.secondary
-            self.add_item(discord.ui.Button(
-                label=str(n), style=style,
-                custom_id=f"mine:bomb_sel:{user_id}:{n}"
-            ))
-        prev_d = page == 0
-        next_d = end >= 24
-        self.add_item(discord.ui.Button(
-            label="◀ 前", style=discord.ButtonStyle.secondary, disabled=prev_d,
-            custom_id=f"mine:bomb_prev:{user_id}", row=4
-        ))
-        self.add_item(discord.ui.Button(
-            label=f"{page+1}/3", style=discord.ButtonStyle.secondary, disabled=True,
-            custom_id="mine:bomb_page_info", row=4
-        ))
-        self.add_item(discord.ui.Button(
-            label="次 ▶", style=discord.ButtonStyle.secondary, disabled=next_d,
-            custom_id=f"mine:bomb_next:{user_id}", row=4
-        ))
-        self.add_item(discord.ui.Button(
-            label="✅ ゲーム開始", style=discord.ButtonStyle.primary,
-            custom_id=f"mine:bomb_confirm:{user_id}", row=4
-        ))
-
-    def get_embed(self, user_id):
-        state = user_state.get(user_id, {})
-        selected = state.get("selected_bombs")
-        bet = state.get("bet")
-        mul_text = "選択してください"
-        if selected:
-            mul_text = format_mul(FINAL_MULTIPLIER[selected])
-        e = discord.Embed(color=0x2b2b2b)
-        if bet:
-            e.add_field(name="💵 賭け額", value=f"**{bet:,}pt**", inline=False)
-        e.add_field(name="💣 爆弾数", value=f"最終倍率：{mul_text}", inline=False)
-        if selected:
-            e.add_field(name="選択中", value=f"**{selected}個**", inline=False)
-        return e
-
+# ========== スタート用パネル ==========
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -228,45 +245,11 @@ class MinesStartPanelView(discord.ui.View):
     async def hard(self, inter, btn):
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.primary, row=1, custom_id="mine:panel_custom")
-    async def custom(self, inter, btn):
-        uid = inter.user.id
-        if uid in game_states:
-            return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
-        
-        bal = get_point_value(uid)
-        
-        class BetInputModal(discord.ui.Modal, title="💎 賭け額を入力"):
-            amount = discord.ui.TextInput(
-                label=f"保有ポイント：{bal:,}pt",
-                placeholder="例：1000",
-                required=True
-            )
-            async def on_submit(s, m):
-                try:
-                    val = int(s.amount.value.strip())
-                except:
-                    return await m.response.send_message("❌ 数字を入力してください", ephemeral=True)
-                if val <= 0 or val > bal:
-                    return await m.response.send_message(f"❌ ポイントが足りません\n保有：{bal:,}pt", ephemeral=True)
-                
-                user_state[uid] = {"bet": val, "selected_bombs": None, "page": 0}
-                view = BombsSelectView(uid)
-                await m.response.send_message(embed=view.get_embed(uid), view=view, ephemeral=True)
-        
-        await inter.response.send_modal(BetInputModal())
-
-    @discord.ui.button(label="💰 ポイント確認", style=discord.ButtonStyle.secondary, row=2, custom_id="mine:panel_check_point")
-    async def check_point_btn(self, inter, btn):
-        bal = get_point_value(inter.user.id)
-        await inter.response.send_message(f"💎 保有ポイント：**{bal:,}pt**", ephemeral=True)
-
     async def _start_fixed(self, inter, bombs):
-        uid = inter.user.id
-        if uid in game_states:
-            return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
+        if inter.user.id in game_states:
+            return await inter.response.send_message("❌ 進行中です！", ephemeral=True)
         mul = format_mul(FINAL_MULTIPLIER[bombs])
-        bal = get_point_value(uid)
+        bal = get_point_value(inter.user.id)
         class BetModal(discord.ui.Modal, title=f"💎 爆弾{bombs}個"):
             bet_in = discord.ui.TextInput(label=f"倍率：{mul}\n賭けるポイント", required=True)
             async def on_submit(s, m):
@@ -275,215 +258,25 @@ class MinesStartPanelView(discord.ui.View):
                 except:
                     return await m.response.send_message("❌ 数字を入力", ephemeral=True)
                 if val <= 0 or val > bal:
-                    return await m.response.send_message(f"❌ ポイントが足りません\n保有：{bal:,}pt", ephemeral=True)
-                
-                user_state[uid] = {"bet": val, "selected_bombs": bombs, "page": 0}
-                await m.response.send_message("✅ 準備完了！「ゲーム開始」を押してください", ephemeral=True)
-                view = BombsSelectView(uid)
-                await inter.followup.send(embed=view.get_embed(uid), view=view, ephemeral=True)
-        
+                    return await m.response.send_message(f"❌ ポイント不足\n保有：{bal:,}pt", ephemeral=True)
+                await start_game(m.user, m.guild, bombs, val)
+                await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetModal())
 
-async def start_game_final(user_id, inter):
-    if user_id in game_states:
-        await inter.response.send_message("❌ ゲーム進行中です！", ephemeral=True)
-        return
-    state = user_state.get(user_id)
-    if not state or not state.get("selected_bombs"):
-        await inter.response.send_message("❌ 爆弾数を選択してください", ephemeral=True)
-        return
-    
-    guild = inter.guild
-    user = inter.user
-    bombs = state["selected_bombs"]
-    bet = state["bet"]
-    
-    # 専用チャンネル作成
+async def start_game(user, guild, bombs, bet):
     channel = await create_game_channel(guild, user)
-    
     game = MinesGame(user, bombs, bet)
     game.channel = channel
-    game_states[user_id] = game
-    temp_channels[user_id] = channel
-    del user_state[user_id]
-    
-    # ゲームメッセージ送信
+    game_states[user.id] = game
+    temp_channels[user.id] = channel
     view = MinesPlayingView(game)
-    message = await channel.send(embed=game.playing_embed(), view=view)
-    game.message = message
-    
-    await inter.response.send_message(f"✅ ゲームチャンネルを作成しました → {channel.mention}", ephemeral=True)
-
-async def close_channel_by_user(user_id):
-    channel = temp_channels.pop(user_id, None)
-    if channel:
-        try:
-            await channel.delete(reason="ゲーム終了のため")
-        except:
-            pass
+    msg = await channel.send(embed=game.playing_embed(), view=view)
+    game.message = msg
 
 async def setup(tree: app_commands.CommandTree, bot=None):
     if bot is None:
         return
-
     if not hasattr(bot, "_mines_views_done"):
         bot.add_view(MinesStartPanelView())
         bot._mines_views_done = True
-        print("✅ mines_panel View登録完了")
-
-    if not hasattr(bot, "_mines_interaction_done"):
-        bot._mines_interaction_done = True
-
-        @bot.event
-        async def on_interaction(inter):
-            if not inter.data or "custom_id" not in inter.data:
-                return
-            cid = inter.data["custom_id"]
-            parts = cid.split(":")
-
-            if cid.startswith("mine:close:"):
-                _, _, uid_str = parts
-                uid = int(uid_str)
-                if inter.user.id != uid and not inter.user.guild_permissions.administrator:
-                    return await inter.response.defer()
-                await close_channel_by_user(uid)
-                await inter.response.send_message("✅ チャンネルを閉じました", ephemeral=True)
-                return
-
-            if cid.startswith("mine:retry:"):
-                _, _, uid_str = parts
-                uid = int(uid_str)
-                if inter.user.id != uid:
-                    return await inter.response.defer()
-                if uid in game_states:
-                    return await inter.response.send_message("❌ ゲーム進行中です！", ephemeral=True)
-                setting = last_settings.get(uid)
-                if not setting:
-                    return await inter.response.send_message("❌ 前回の設定がありません", ephemeral=True)
-                
-                guild = inter.guild
-                user = inter.user
-                bombs = setting["bombs"]
-                bet = setting["bet"]
-                
-                bal = get_point_value(uid)
-                if bet > bal:
-                    return await inter.response.send_message(f"❌ ポイントが足りません\n賭け額：{bet:,}pt\n保有：{bal:,}pt", ephemeral=True)
-                
-                channel = await create_game_channel(guild, user)
-                game = MinesGame(user, bombs, bet)
-                game.channel = channel
-                game_states[uid] = game
-                temp_channels[uid] = channel
-                
-                view = MinesPlayingView(game)
-                message = await channel.send(embed=game.playing_embed(), view=view)
-                game.message = message
-                
-                await inter.response.send_message(f"✅ 新しいゲームチャンネル → {channel.mention}", ephemeral=True)
-                return
-
-            if cid.startswith("mine:bomb_prev:"):
-                _, _, uid_str = parts
-                uid = int(uid_str)
-                if inter.user.id != uid:
-                    return await inter.response.defer()
-                if uid not in user_state:
-                    return await inter.response.send_message("❌ 最初からやり直してください", ephemeral=True)
-                user_state[uid]["page"] = max(0, user_state[uid]["page"] - 1)
-                view = BombsSelectView(uid)
-                await inter.response.edit_message(embed=view.get_embed(uid), view=view)
-                return
-
-            if cid.startswith("mine:bomb_next:"):
-                _, _, uid_str = parts
-                uid = int(uid_str)
-                if inter.user.id != uid:
-                    return await inter.response.defer()
-                if uid not in user_state:
-                    return await inter.response.send_message("❌ 最初からやり直してください", ephemeral=True)
-                user_state[uid]["page"] = min(2, user_state[uid]["page"] + 1)
-                view = BombsSelectView(uid)
-                await inter.response.edit_message(embed=view.get_embed(uid), view=view)
-                return
-
-            if cid.startswith("mine:bomb_sel:"):
-                _, _, uid_str, num_str = parts
-                uid = int(uid_str)
-                if inter.user.id != uid:
-                    return await inter.response.defer()
-                if uid not in user_state:
-                    return await inter.response.send_message("❌ 最初からやり直してください", ephemeral=True)
-                user_state[uid]["selected_bombs"] = int(num_str)
-                view = BombsSelectView(uid)
-                await inter.response.edit_message(embed=view.get_embed(uid), view=view)
-                return
-
-            if cid.startswith("mine:bomb_confirm:"):
-                _, _, uid_str = parts
-                uid = int(uid_str)
-                if inter.user.id != uid:
-                    return await inter.response.defer()
-                await start_game_final(uid, inter)
-                return
-
-            if cid.startswith("mine:cell:"):
-                _, _, uid_str, idx_str = parts
-                uid = int(uid_str)
-                if inter.user.id != uid:
-                    return await inter.response.defer()
-                game = game_states.get(uid)
-                if not game or game.game_over:
-                    return await inter.response.defer()
-                
-                idx = int(idx_str)
-                if game.opened[idx]:
-                    return await inter.response.defer()
-                
-                game.opened[idx] = True
-
-                if game.grid[idx]:
-                    # 爆弾
-                    game.game_over = True
-                    add_point_value(uid, -game.bet)
-                    del game_states[uid]
-                    last_settings[uid] = {"bombs": game.bombs, "bet": game.bet}
-                    
-                    embed = game.result_embed(
-                        "💣 爆弾！",
-                        f"🔹 賭け：{game.bet:,}pt\n🔹 結果：-{game.bet:,}pt",
-                        0xE74C3C
-                    )
-                    await inter.response.edit_message(embed=embed, view=MinesResultView(uid))
-                else:
-                    # 当たり
-                    game.opened_count += 1
-                    game.multiplier = calc_step_multiplier(game.bombs, game.opened_count)
-                    await inter.response.edit_message(
-                        embed=game.playing_embed(),
-                        view=MinesPlayingView(game)
-                    )
-                return
-
-            if cid.startswith("mine:cash:"):
-                _, _, uid_str = parts
-                uid = int(uid_str)
-                if inter.user.id != uid:
-                    return await inter.response.defer()
-                game = game_states.get(uid)
-                if not game or game.game_over:
-                    return await inter.response.defer()
-                
-                game.game_over = True
-                win = int(game.bet * game.multiplier)
-                add_point_value(uid, win)
-                del game_states[uid]
-                last_settings[uid] = {"bombs": game.bombs, "bet": game.bet}
-                
-                embed = game.result_embed(
-                    "💰 回収完了！",
-                    f"🔹 賭け：{game.bet:,}pt\n🔹 倍率：{game.multiplier}倍\n🔹 獲得：+{win:,}pt",
-                    0x2ECC71
-                )
-                await inter.response.edit_message(embed=embed, view=MinesResultView(uid))
-                return
+        print("✅ mines_panel 登録完了")
