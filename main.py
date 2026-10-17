@@ -208,25 +208,29 @@ async def on_ready():
     await elevator_panel.setup(tree_main, bot_main); print("  ✅ elevator_panel")
     await mines_panel.setup(tree_main, bot_main); print("  ✅ mines_panel")
 
-    # ✅ マインス コマンドをmain.pyから直接登録（二重体制）
+    # ✅ マインス コマンドをmain.pyから直接登録（最終確定版）
     @tree_main.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")
-    async def cmd_mine_panel(inter):
+    async def cmd_mine_panel(inter: discord.Interaction):
         if not is_owner(inter):
             await inter.response.send_message("❌ オーナー専用です", ephemeral=True)
             return
         from features.mines_panel import MinesStartPanelView
-        e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
-        e.description = (
-            "爆弾を避けて金塊を集め、好きなタイミングで回収！\n"
-            "────────────────────────────\n"
-            "✅ かんたん  [3個]  約15.7倍\n"
-            "⚪ ふつう    [5個]  約32.9倍\n"
-            "🔴 むずかしい [8個]  約96.3倍\n"
-            "⚙️ 自分で設定 [1～24個]"
+        embed = discord.Embed(
+            title="💎 マインス 💣",
+            description=(
+                "爆弾を避けて金塊を集め、好きなタイミングで回収！\n"
+                "────────────────────────────\n"
+                "✅ かんたん  [3個]  約15.7倍\n"
+                "⚪ ふつう    [5個]  約32.9倍\n"
+                "🔴 むずかしい [8個]  約96.3倍\n"
+                "⚙️ 自分で設定 [1～24個]"
+            ),
+            color=0x1a1a1a
         )
-        await inter.response.send_message(embed=e, view=MinesStartPanelView())
+        await inter.response.send_message(embed=embed, view=MinesStartPanelView())
         await inter.followup.send("✅ マインスパネル設置完了", ephemeral=True)
-
+    
+    print("  ✅ マインスコマンド 直接登録完了")
     print("✅ メインBot 全コマンド登録完了")
     
     print("\n🔄 メインBot グローバル同期中...")
