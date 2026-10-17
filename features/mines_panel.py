@@ -224,31 +224,35 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message(embed=game.embed(), view=game, ephemeral=True)
         await inter.response.send_modal(BetModal())
 
-# ✅ スロットと全く同じ書き方に統一
+# ✅ コマンド定義をsetupの外に出す（他のファイルと同じ）
+async def mines_panel_command(inter):
+    if not is_owner(inter):
+        await inter.response.send_message("❌ オーナー専用です", ephemeral=True)
+        return
+    e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
+    e.description = (
+        "爆弾を避けて金塊を集め、好きなタイミングで回収！\n"
+        "────────────────────────────\n"
+        "✅ かんたん  [3個]  約15.7倍\n"
+        "⚪ ふつう    [5個]  約32.9倍\n"
+        "🔴 むずかしい [8個]  約96.3倍\n"
+        "⚙️ 自分で設定 [1～24個]"
+    )
+    await inter.response.send_message(embed=e, view=MinesStartPanelView())
+    await inter.followup.send("✅ マインスパネル設置完了", ephemeral=True)
+
 async def setup(tree: app_commands.CommandTree, bot=None):
+    # View登録だけ
     if bot is not None and not hasattr(bot, "_mines_panel_registered"):
         bot.add_view(MinesStartPanelView())
         bot.add_view(BombsSelectView())
         bot._mines_panel_registered = True
         print("✅ mines_panel 永続View登録完了")
-
-    @tree.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")
-    async def cmd(itx):
-        if not is_owner(itx):  # ✅ awaitなし！スロットと同じ
-            await itx.response.send_message("❌ オーナー専用です", ephemeral=True)
-            return
-        e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
-        e.description = (
-            "爆弾を避けて金塊を集め、好きなタイミングで回収！\n"
-            "────────────────────────────\n"
-            "✅ かんたん  [3個]  約15.7倍\n"
-            "⚪ ふつう    [5個]  約32.9倍\n"
-            "🔴 むずかしい [8個]  約96.3倍\n"
-            "⚙️ 自分で設定 [1～24個]"
-        )
-        await itx.response.send_message(embed=e, view=MinesStartPanelView())
-        await itx.followup.send("✅ マインスパネル設置完了", ephemeral=True)
-
+    
+    # コマンド登録
+    tree.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")(mines_panel_command)
+    
+    # インタラクション受信
     @bot.listen()
     async def on_interaction(inter):
         if not inter.data or "custom_id" not in inter.data:
