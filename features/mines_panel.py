@@ -225,6 +225,7 @@ class MinesStartPanelView(discord.ui.View):
         await inter.response.send_modal(BetModal())
 
 async def setup(tree: app_commands.CommandTree, bot=None):
+    # View の永続登録のみ行う
     if bot is not None and not hasattr(bot, "_mines_panel_registered"):
         bot.add_view(MinesStartPanelView())
         bot.add_view(BombsSelectView())
@@ -232,90 +233,91 @@ async def setup(tree: app_commands.CommandTree, bot=None):
         print("✅ mines_panel 永続View登録完了")
 
     # インタラクション処理
-    @bot.listen()
-    async def on_interaction(inter):
-        if not inter.data or "custom_id" not in inter.data:
-            return
-        cid = inter.data["custom_id"]
-        parts = cid.split(":")
+    if bot is not None:
+        @bot.listen()
+        async def on_interaction(inter):
+            if not inter.data or "custom_id" not in inter.data:
+                return
+            cid = inter.data["custom_id"]
+            parts = cid.split(":")
 
-        if cid.startswith("mine:bomb_sel:"):
-            _, _, uid_str, num_str = parts
-            uid = int(uid_str)
-            if inter.user.id != uid:
-                return await inter.response.defer()
-            num = int(num_str)
-            if uid not in user_bomb_selection:
-                user_bomb_selection[uid] = {"page": 0, "selected": None}
-            user_bomb_selection[uid]["selected"] = num
-            view = BombsSelectView().render_for_user(uid)
-            await inter.response.edit_message(embed=view.embed_for_user(uid), view=view)
+            if cid.startswith("mine:bomb_sel:"):
+                _, _, uid_str, num_str = parts
+                uid = int(uid_str)
+                if inter.user.id != uid:
+                    return await inter.response.defer()
+                num = int(num_str)
+                if uid not in user_bomb_selection:
+                    user_bomb_selection[uid] = {"page": 0, "selected": None}
+                user_bomb_selection[uid]["selected"] = num
+                view = BombsSelectView().render_for_user(uid)
+                await inter.response.edit_message(embed=view.embed_for_user(uid), view=view)
 
-        elif cid.startswith("mine:bomb_prev:"):
-            _, _, uid_str = parts
-            uid = int(uid_str)
-            if inter.user.id != uid:
-                return await inter.response.defer()
-            if uid not in user_bomb_selection:
-                user_bomb_selection[uid] = {"page": 1, "selected": None}
-            user_bomb_selection[uid]["page"] = max(0, user_bomb_selection[uid]["page"] - 1)
-            view = BombsSelectView().render_for_user(uid)
-            await inter.response.edit_message(embed=view.embed_for_user(uid), view=view)
+            elif cid.startswith("mine:bomb_prev:"):
+                _, _, uid_str = parts
+                uid = int(uid_str)
+                if inter.user.id != uid:
+                    return await inter.response.defer()
+                if uid not in user_bomb_selection:
+                    user_bomb_selection[uid] = {"page": 1, "selected": None}
+                user_bomb_selection[uid]["page"] = max(0, user_bomb_selection[uid]["page"] - 1)
+                view = BombsSelectView().render_for_user(uid)
+                await inter.response.edit_message(embed=view.embed_for_user(uid), view=view)
 
-        elif cid.startswith("mine:bomb_next:"):
-            _, _, uid_str = parts
-            uid = int(uid_str)
-            if inter.user.id != uid:
-                return await inter.response.defer()
-            if uid not in user_bomb_selection:
-                user_bomb_selection[uid] = {"page": -1, "selected": None}
-            user_bomb_selection[uid]["page"] = min(2, user_bomb_selection[uid]["page"] + 1)
-            view = BombsSelectView().render_for_user(uid)
-            await inter.response.edit_message(embed=view.embed_for_user(uid), view=view)
+            elif cid.startswith("mine:bomb_next:"):
+                _, _, uid_str = parts
+                uid = int(uid_str)
+                if inter.user.id != uid:
+                    return await inter.response.defer()
+                if uid not in user_bomb_selection:
+                    user_bomb_selection[uid] = {"page": -1, "selected": None}
+                user_bomb_selection[uid]["page"] = min(2, user_bomb_selection[uid]["page"] + 1)
+                view = BombsSelectView().render_for_user(uid)
+                await inter.response.edit_message(embed=view.embed_for_user(uid), view=view)
 
-        elif cid.startswith("mine:bomb_confirm:"):
-            _, _, uid_str = parts
-            uid = int(uid_str)
-            if inter.user.id != uid:
-                return await inter.response.defer()
-            state = user_bomb_selection.get(uid, {})
-            selected = state.get("selected")
-            if not selected:
-                return await inter.response.send_message("❌ 爆弾数を選択してください", ephemeral=True)
-            if uid in active_games:
-                return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
-            mul = format_mul(FINAL_MULTIPLIER[selected])
-            class CustomModal(discord.ui.Modal(title="💎 マインス - 賭け額入力")):
-                bet_in = discord.ui.TextInput(label=f"爆弾{selected}個 最終倍率：{mul}\n賭けるポイント", required=True)
-                async def on_submit(s, m):
-                    try:
-                        val = int(s.bet_in.value.strip())
-                    except:
-                        return await m.response.send_message("❌ 数値を入力", ephemeral=True)
-                    bal = get_point_value(m.user.id)
-                    if val <= 0 or val > bal:
-                        return await m.response.send_message(f"❌ 無効\n保有：{bal:,}pt", ephemeral=True)
-                    game = MinesGameView(m.user.id, selected, val)
-                    active_games[m.user.id] = game
-                    await m.response.send_message(embed=game.embed(), view=game, ephemeral=True)
-            await inter.response.send_modal(CustomModal())
+            elif cid.startswith("mine:bomb_confirm:"):
+                _, _, uid_str = parts
+                uid = int(uid_str)
+                if inter.user.id != uid:
+                    return await inter.response.defer()
+                state = user_bomb_selection.get(uid, {})
+                selected = state.get("selected")
+                if not selected:
+                    return await inter.response.send_message("❌ 爆弾数を選択してください", ephemeral=True)
+                if uid in active_games:
+                    return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
+                mul = format_mul(FINAL_MULTIPLIER[selected])
+                class CustomModal(discord.ui.Modal(title="💎 マインス - 賭け額入力")):
+                    bet_in = discord.ui.TextInput(label=f"爆弾{selected}個 最終倍率：{mul}\n賭けるポイント", required=True)
+                    async def on_submit(s, m):
+                        try:
+                            val = int(s.bet_in.value.strip())
+                        except:
+                            return await m.response.send_message("❌ 数値を入力", ephemeral=True)
+                        bal = get_point_value(m.user.id)
+                        if val <= 0 or val > bal:
+                            return await m.response.send_message(f"❌ 無効\n保有：{bal:,}pt", ephemeral=True)
+                        game = MinesGameView(m.user.id, selected, val)
+                        active_games[m.user.id] = game
+                        await m.response.send_message(embed=game.embed(), view=game, ephemeral=True)
+                await inter.response.send_modal(CustomModal())
 
-        elif cid.startswith("mine:cell:"):
-            _, _, uid_str, idx_str = parts
-            uid = int(uid_str)
-            if inter.user.id != uid:
-                return await inter.response.defer()
-            game = active_games.get(uid)
-            if not game or game.game_over:
-                return await inter.response.defer()
-            await game.open_cell(inter, int(idx_str))
+            elif cid.startswith("mine:cell:"):
+                _, _, uid_str, idx_str = parts
+                uid = int(uid_str)
+                if inter.user.id != uid:
+                    return await inter.response.defer()
+                game = active_games.get(uid)
+                if not game or game.game_over:
+                    return await inter.response.defer()
+                await game.open_cell(inter, int(idx_str))
 
-        elif cid.startswith("mine:cash:"):
-            _, _, uid_str = parts
-            uid = int(uid_str)
-            if inter.user.id != uid:
-                return await inter.response.defer()
-            game = active_games.get(uid)
-            if not game or game.game_over:
-                return await inter.response.defer()
-            await game.cash_out(inter)
+            elif cid.startswith("mine:cash:"):
+                _, _, uid_str = parts
+                uid = int(uid_str)
+                if inter.user.id != uid:
+                    return await inter.response.defer()
+                game = active_games.get(uid)
+                if not game or game.game_over:
+                    return await inter.response.defer()
+                await game.cash_out(inter)
