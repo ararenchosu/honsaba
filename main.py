@@ -50,7 +50,6 @@ intents_main.members = True
 bot_main = discord.Client(intents=intents_main)
 tree_main = app_commands.CommandTree(bot_main)
 
-# 重複実行防止：最初に1回だけ実行させる
 bot_main._ready_done = False
 
 def get_jst_now():
@@ -96,17 +95,15 @@ async def on_message(message):
 
 @bot_main.event
 async def on_ready():
-    # ===== 最優先：2回目以降は即終了 =====
     if bot_main._ready_done:
         return
     bot_main._ready_done = True
-    # ==================================
 
     print(f"\n========== メインBot 起動 ==========")
     print(f"✅ ログイン：{bot_main.user}")
-    
+
     last_reason = get_and_clear_reason()
-    
+
     def check_view_no_args(view_class, view_name: str):
         try:
             instance = view_class()
@@ -137,7 +134,7 @@ async def on_ready():
         from features.command_list_panel import CommandListView
         from features.elevator_panel import ElevatorView
         from features.mines_panel import MinesStartPanelView, BombsSelectView
-        
+
         views_to_register_main = [
             (LotteryPanelView, "LotteryPanelView"),
             (PointCheckPanelView, "PointCheckPanelView"),
@@ -167,7 +164,7 @@ async def on_ready():
             (MinesStartPanelView, "MinesStartPanelView"),
             (BombsSelectView, "BombsSelectView"),
         ]
-        
+
         for view_cls, name in views_to_register_main:
             instance = check_view_no_args(view_cls, name)
             if instance:
@@ -175,17 +172,17 @@ async def on_ready():
                 print(f"   ✅ {name}")
             else:
                 all_ok_main = False
-        
+
         clv = CommandListView()
         clv.tree = tree_main
         bot_main.add_view(clv)
         print("   ✅ CommandListView")
-        
+
         if all_ok_main:
             print("✅ メインBot 全View 永続登録完了 ✨")
         else:
-            print("⚠️ メインBot：上記の❌ を修正して再起動してください")
-            
+            print("⚠️ メインBot：上記の❌ を修正して再起動してくださ")
+
     except Exception as e:
         print(f"❌ メインBot View登録エラー: {e}")
         import traceback
@@ -237,23 +234,24 @@ async def on_ready():
         await inter.response.send_message(embed=em, view=MinesStartPanelView())
         await inter.followup.send("✅ パネル設置完了", ephemeral=True)
 
-    print("  ✅ マインスコマンド → 登録完了！")
+    print("  ✅ ✅ ✅ マインスコマンド → 登録完了！")
     print("✅ メインBot 全コマンド登録完了")
-    
+
     print("\n🔄 グローバル同期中...")
     synced = await tree_main.sync()
     print(f"✅ 同期完了！合計 {len(synced)} 件")
-    
+
     print("\n🔄 自動更新タスク起動中...")
     asyncio.create_task(ranking_panel.auto_update_task(bot_main))
     print("✅ ランキング自動更新タスク起動完了")
-    
+
     if last_reason == "restart_button":
         await send_status_embed(bot_main, "✅ 再起動完了",
             "ボタン操作により再起動されました。\n全パネル復旧済みです✨", 0xF39C12)
     else:
         await send_status_embed(bot_main, "🔄 起動完了",
             "機能追加・更新により起動しました。\n全パネル復旧済みです✨", 0x9B59B6)
+
     print("✅ 起動通知送信完了")
     print("✅ メインBot 準備完了\n")
 
@@ -276,9 +274,9 @@ if TOKEN_SUB:
     intents_sub.members = True
     bot_sub = discord.Client(intents=intents_sub)
     tree_sub = app_commands.CommandTree(bot_sub)
-    
+
     bot_sub._ready_done = False
-    
+
     @bot_sub.event
     async def on_ready():
         if bot_sub._ready_done:
