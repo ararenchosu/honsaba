@@ -60,23 +60,65 @@ FINAL_MULTIPLIER = {
     14: 15000.0,   # 14個 → 15,000倍
     15: 27000.0,   # 15個 → 27,000倍
     16: 50000.0,   # 16個 → 50,000倍
-    17:100000.0,   # 17個 → 100,000倍
-    18:250000.0,   # 18個 → 250,000倍
-    19:600000.0,   # 19個 → 600,000倍
+    17: 100000.0,  # 17個 → 10万倍
+    18: 250000.0,  # 18個 → 25万倍
+    19: 600000.0,  # 19個 → 60万倍
     20:  2000000.0, # 20個 → 200万倍
     21:  8000000.0, # 21個 → 800万倍
     22: 35000000.0, # 22個 → 3,500万倍
-    23:200000000.0, # 23個 → 2億倍
-    24:5000000000.0, # 24個 → 50億倍 💥
+    23: 200000000.0,# 23個 → 2億倍
+    24: 5000000000.0,# 24個 → 50億倍 💥
 }
 
+# ✅ 単位表示フォーマット：万 ～ 無量大数
+def format_value(val):
+    val = float(val)
+    units = [
+        ("無量大数", 10**68),
+        ("那由多", 10**64),
+        ("不可思議", 10**60),
+        ("阿僧祇", 10**56),
+        ("恒河沙", 10**52),
+        ("極", 10**48),
+        ("載", 10**44),
+        ("正", 10**40),
+        ("澗", 10**36),
+        ("溝", 10**32),
+        ("穣", 10**28),
+        ("垓", 10**24),
+        ("京", 10**20),
+        ("兆", 10**16),
+        ("億", 10**12),
+        ("万", 10**8),
+    ]
+    for name, scale in units:
+        if val >= scale:
+            return f"{val / scale:.2f} {name}"
+    return f"{int(val):,}"
+
 def format_mul(val):
-    if val >= 100000000:
-        return f"{val/100000000:.1f}億倍"
-    elif val >= 10000:
-        return f"{val/10000:.1f}万倍"
-    elif val >= 1000:
-        return f"{val:,}倍"
+    val = float(val)
+    units = [
+        ("無量大数", 10**68),
+        ("那由多", 10**64),
+        ("不可思議", 10**60),
+        ("阿僧祇", 10**56),
+        ("恒河沙", 10**52),
+        ("極", 10**48),
+        ("載", 10**44),
+        ("正", 10**40),
+        ("澗", 10**36),
+        ("溝", 10**32),
+        ("穣", 10**28),
+        ("垓", 10**24),
+        ("京", 10**20),
+        ("兆", 10**16),
+        ("億", 10**12),
+        ("万", 10**8),
+    ]
+    for name, scale in units:
+        if val >= scale:
+            return f"{val / scale:.2f} {name}倍"
     return f"{val:.1f}倍"
 
 def calc_step_multiplier(bombs: int, opened: int):
@@ -84,7 +126,6 @@ def calc_step_multiplier(bombs: int, opened: int):
     if opened >= safe:
         return FINAL_MULTIPLIER[bombs]
     ratio = opened / safe
-    # 上がり幅を急激に
     return round(1.0 + (FINAL_MULTIPLIER[bombs] - 1.0) * ratio ** 2.2, 2)
 
 game_states = {}
@@ -127,7 +168,7 @@ class MinesGame:
         e = discord.Embed(title="💎 マインス 💣", color=0xFFD700)
         e.add_field(name="🔹 プレイヤー", value=self.user.mention, inline=True)
         e.add_field(name="🔹 爆弾数", value=f"{self.bombs}個", inline=True)
-        e.add_field(name="🔹 賭け額", value=f"{self.bet:,}pt", inline=True)
+        e.add_field(name="🔹 賭け額", value=format_value(self.bet), inline=True)
         e.add_field(name="🔥 現在倍率", value=f"**{format_mul(self.multiplier)}**", inline=True)
         e.add_field(name="🎯 盤面", value=self.board_text(), inline=False)
         return e
@@ -211,7 +252,7 @@ class MinesBoardView(discord.ui.View):
             add_point_value(g.user_id, -g.bet)
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
             game_states.pop(g.user_id, None)
-            embed = g.result_embed("💣 爆弾！", f"🔹 賭け：{g.bet:,}pt\n🔹 結果：-{g.bet:,}pt", 0xE74C3C)
+            embed = g.result_embed("💣 爆弾！", f"🔹 賭け：{format_value(g.bet)}\n🔹 結果：-{format_value(g.bet)}", 0xE74C3C)
             try:
                 await inter.response.edit_message(embed=embed, view=MinesResultView(g))
                 if g.control_message:
@@ -230,7 +271,7 @@ class MinesBoardView(discord.ui.View):
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
             game_states.pop(g.user_id, None)
             embed = g.result_embed("🎉 全開け！",
-                f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{format_mul(g.multiplier)}\n🔹 獲得：+{win:,}pt", 0xFFD700)
+                f"🔹 賭け：{format_value(g.bet)}\n🔹 確定倍率：{format_mul(g.multiplier)}\n🔹 獲得：+{format_value(win)}", 0xFFD700)
             try:
                 await inter.response.edit_message(embed=embed, view=MinesResultView(g))
                 if g.control_message:
@@ -279,7 +320,7 @@ class MinesControlView(discord.ui.View):
         last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
         game_states.pop(g.user_id, None)
         embed = g.result_embed("💰 回収完了！",
-            f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{format_mul(g.multiplier)}\n🔹 獲得：+{win:,}pt", 0x2ECC71)
+            f"🔹 賭け：{format_value(g.bet)}\n🔹 確定倍率：{format_mul(g.multiplier)}\n🔹 獲得：+{format_value(win)}", 0x2ECC71)
         try:
             if g.message:
                 await g.message.edit(embed=embed, view=MinesResultView(g))
@@ -310,7 +351,7 @@ class MinesResultView(discord.ui.View):
         bal = get_point_value(uid)
         if setting["bet"] > bal:
             return await inter.response.send_message(
-                f"❌ ポイントが足りません\n賭け額：{setting['bet']:,}pt\n保有：{bal:,}pt", ephemeral=True)
+                f"❌ ポイントが足りません\n賭け額：{format_value(setting['bet'])}\n保有：{format_value(bal)}", ephemeral=True)
         
         channel = channel_map.get(uid)
         if not channel:
@@ -318,8 +359,7 @@ class MinesResultView(discord.ui.View):
                 channel = await create_game_channel(inter.guild, inter.user)
                 channel_map[uid] = channel
             except Exception as e:
-                return await inter.response.send_message(
-                    f"❌ チャンネル作成失敗：{e}", ephemeral=True)
+                return await inter.response.send_message(f"❌ チャンネル作成失敗：{e}", ephemeral=True)
         
         new_game = MinesGame(inter.user, setting["bombs"], setting["bet"])
         new_game.channel = channel
@@ -361,19 +401,19 @@ class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v3_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v4_easy")
     async def easy(self, inter, btn):
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v3_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v4_normal")
     async def normal(self, inter, btn):
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v3_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v4_hard")
     async def hard(self, inter, btn):
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v3_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v4_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
@@ -381,7 +421,7 @@ class MinesStartPanelView(discord.ui.View):
         bal = get_point_value(uid)
         class BetInputModal(discord.ui.Modal, title="💎 自分で設定"):
             bet_in = discord.ui.TextInput(
-                label=f"賭けるポイント（保有：{bal:,}pt）",
+                label=f"賭けるポイント（保有：{format_value(bal)}）",
                 placeholder="例：1000",
                 required=True
             )
@@ -398,7 +438,7 @@ class MinesStartPanelView(discord.ui.View):
                     return await m.response.send_message("❌ 数字を入力してください", ephemeral=True)
                 if bet_val <= 0 or bet_val > bal:
                     return await m.response.send_message(
-                        f"❌ ポイントが足りません\n保有：{bal:,}pt", ephemeral=True)
+                        f"❌ ポイントが足りません\n保有：{format_value(bal)}", ephemeral=True)
                 if bomb_val < 1 or bomb_val > 24:
                     return await m.response.send_message(
                         "❌ 爆弾の数は1～24で指定してください", ephemeral=True)
@@ -425,7 +465,7 @@ class MinesStartPanelView(discord.ui.View):
                     return await m.response.send_message("❌ 数字を入力してください", ephemeral=True)
                 if val <= 0 or val > bal:
                     return await m.response.send_message(
-                        f"❌ ポイントが足りません\n保有：{bal:,}pt", ephemeral=True)
+                        f"❌ ポイントが足りません\n保有：{format_value(bal)}", ephemeral=True)
                 await start_game(m.user, m.guild, bombs, val)
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetModal())
