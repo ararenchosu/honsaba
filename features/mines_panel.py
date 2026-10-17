@@ -49,7 +49,6 @@ def calc_step_multiplier(bombs: int, opened: int):
     ratio = opened / safe
     return round(1.0 + (FINAL_MULTIPLIER[bombs] - 1.0) * ratio ** 1.5, 2)
 
-# ========== ゲーム管理（ユーザーIDで一意に） ==========
 active_games = {}
 user_bomb_selection = {}  # {user_id: {"page": 0, "selected": None}}
 
@@ -134,51 +133,55 @@ class MinesGameView(discord.ui.View):
 BOMBS_PER_PAGE = 8
 
 class BombsSelectView(discord.ui.View):
-    def __init__(self, user_id: int):
+    # ✅ 引数なしで永続登録できるように修正
+    def __init__(self):
         super().__init__(timeout=None)
-        self.user_id = user_id
-        state = user_bomb_selection.get(user_id, {"page": 0, "selected": None})
-        self.page = state["page"]
-        self.selected = state["selected"]
-        self._render()
 
-    def _render(self):
+    def render_for_user(self, user_id: int):
+        """ユーザーの状態に合わせてボタンを再構成"""
         self.clear_items()
-        start = self.page * BOMBS_PER_PAGE + 1
+        state = user_bomb_selection.get(user_id, {"page": 0, "selected": None})
+        page = state["page"]
+        selected = state["selected"]
+
+        start = page * BOMBS_PER_PAGE + 1
         end = min(24, start + BOMBS_PER_PAGE - 1)
         for n in range(start, end + 1):
-            style = discord.ButtonStyle.primary if self.selected == n else discord.ButtonStyle.secondary
+            style = discord.ButtonStyle.primary if selected == n else discord.ButtonStyle.secondary
             self.add_item(discord.ui.Button(
                 label=str(n), style=style,
-                custom_id=f"mine:bomb_sel:{self.user_id}:{n}"
+                custom_id=f"mine:bomb_sel:{user_id}:{n}"
             ))
-        prev_d = self.page == 0
+        prev_d = page == 0
         next_d = end >= 24
         self.add_item(discord.ui.Button(
             label="◀ 前", style=discord.ButtonStyle.secondary, disabled=prev_d,
-            custom_id=f"mine:bomb_prev:{self.user_id}", row=4
+            custom_id=f"mine:bomb_prev:{user_id}", row=4
         ))
         self.add_item(discord.ui.Button(
-            label=f"{self.page+1}/3", style=discord.ButtonStyle.secondary, disabled=True,
+            label=f"{page+1}/3", style=discord.ButtonStyle.secondary, disabled=True,
             custom_id="mine:bomb_page_info", row=4
         ))
         self.add_item(discord.ui.Button(
             label="次 ▶", style=discord.ButtonStyle.secondary, disabled=next_d,
-            custom_id=f"mine:bomb_next:{self.user_id}", row=4
+            custom_id=f"mine:bomb_next:{user_id}", row=4
         ))
         self.add_item(discord.ui.Button(
             label="✅ 決定する", style=discord.ButtonStyle.primary,
-            custom_id=f"mine:bomb_confirm:{self.user_id}", row=4
+            custom_id=f"mine:bomb_confirm:{user_id}", row=4
         ))
+        return self
 
-    def embed(self):
+    def embed_for_user(self, user_id: int):
+        state = user_bomb_selection.get(user_id, {"page": 0, "selected": None})
+        selected = state["selected"]
         mul_text = "選択してください"
-        if self.selected:
-            mul_text = format_mul(FINAL_MULTIPLIER[self.selected])
+        if selected:
+            mul_text = format_mul(FINAL_MULTIPLIER[selected])
         e = discord.Embed(color=0x2b2b2b)
         e.add_field(name="**爆弾数**", value=f"最終倍率：{mul_text}", inline=False)
-        if self.selected:
-            e.add_field(name="選択中", value=f"**{self.selected}個**", inline=False)
+        if selected:
+            e.add_field(name="選択中", value=f"**{selected}個**", inline=False)
         return e
 
 class MinesStartPanelView(discord.ui.View):
@@ -201,8 +204,8 @@ class MinesStartPanelView(discord.ui.View):
     async def custom(self, inter, btn):
         uid = inter.user.id
         user_bomb_selection[uid] = {"page": 0, "selected": None}
-        view = BombsSelectView(uid)
-        await inter.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+        view = BombsSelectView().render_for_user(uid)
+        await inter.response.send_message(embed=view.embed_for_user(uid), view=view, ephemeral=True)
 
     async def _start_game(self, inter, bombs):
         uid = inter.user.id
@@ -226,8 +229,9 @@ class MinesStartPanelView(discord.ui.View):
 
 async def setup(tree, bot):
     if not hasattr(bot, "_mines_views_ready"):
+        # ✅ 引数なしで登録 → エラー解消
         bot.add_view(MinesStartPanelView())
-        bot.add_view(BombsSelectView(0))
+        bot.add_view(BombsSelectView())
         bot._mines_views_ready = True
         print("✅ mines_panel 永久View登録完了")
 
@@ -267,8 +271,8 @@ async def setup(tree, bot):
             if uid not in user_bomb_selection:
                 user_bomb_selection[uid] = {"page": 0, "selected": None}
             user_bomb_selection[uid]["selected"] = num
-            view = BombsSelectView(uid)
-            await inter.response.edit_message(embed=view.embed(), view=view)
+            view = BombsSelectView().render_for_user(uid)
+            await inter.response.edit_message(embed=view.embed_for_user(uid), view=view)
 
         elif cid.startswith("mine:bomb_prev:"):
             _, _, uid_str = parts
@@ -278,8 +282,8 @@ async def setup(tree, bot):
             if uid not in user_bomb_selection:
                 user_bomb_selection[uid] = {"page": 1, "selected": None}
             user_bomb_selection[uid]["page"] = max(0, user_bomb_selection[uid]["page"] - 1)
-            view = BombsSelectView(uid)
-            await inter.response.edit_message(embed=view.embed(), view=view)
+            view = BombsSelectView().render_for_user(uid)
+            await inter.response.edit_message(embed=view.embed_for_user(uid), view=view)
 
         elif cid.startswith("mine:bomb_next:"):
             _, _, uid_str = parts
@@ -289,8 +293,8 @@ async def setup(tree, bot):
             if uid not in user_bomb_selection:
                 user_bomb_selection[uid] = {"page": -1, "selected": None}
             user_bomb_selection[uid]["page"] = min(2, user_bomb_selection[uid]["page"] + 1)
-            view = BombsSelectView(uid)
-            await inter.response.edit_message(embed=view.embed(), view=view)
+            view = BombsSelectView().render_for_user(uid)
+            await inter.response.edit_message(embed=view.embed_for_user(uid), view=view)
 
         elif cid.startswith("mine:bomb_confirm:"):
             _, _, uid_str = parts
