@@ -127,11 +127,25 @@ def save_history_entry(entry):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
 
-def clear_history_user(user_id):
+def clear_all_user_data(user_id):
+    """✅ ユーザーの履歴＋状態を完全消去"""
+    uid = str(user_id)
+    # 1. プレイ履歴削除
     all_data = load_history()
     all_data = [h for h in all_data if h.get("user_id") != user_id]
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
+    # 2. ゲーム状態・設定履歴・チャンネル情報を全削除
+    if user_id in game_states:
+        del game_states[user_id]
+    if user_id in last_settings:
+        del last_settings[user_id]
+    if user_id in channel_map:
+        del channel_map[user_id]
+    if user_id in message_map:
+        del message_map[user_id]
+    if user_id in control_message_map:
+        del control_message_map[user_id]
     return True
 
 FINAL_MULTIPLIER = {
@@ -429,21 +443,22 @@ class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v9_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v10_easy")
     async def easy(self, inter, btn):
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v9_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v10_normal")
     async def normal(self, inter, btn):
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v9_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v10_hard")
     async def hard(self, inter, btn):
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v9_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v10_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
+        # ✅ 全消去後はここが必ず通るようになる
         if uid in game_states:
             return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
         bal = get_point_value(uid)
@@ -473,22 +488,25 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetInputModal())
 
-    # ✅ 全履歴一括削除ボタンに変更
-    @discord.ui.button(label="📋 全プレイ履歴削除", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v9_clearall")
-    async def clear_all_history(self, inter, btn):
+    # ✅ 全消去ボタン：履歴＋状態＋チャンネル情報 まとめてリセット
+    @discord.ui.button(label="🗑️ 全履歴・状態消去", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v10_resetall")
+    async def reset_all(self, inter, btn):
         uid = inter.user.id
         user_history = load_history(uid)
-        if not user_history:
-            return await inter.response.send_message("📋 まだプレイ履歴がありません", ephemeral=True)
+        history_count = len(user_history)
+        is_active = uid in game_states
         
-        # ✅ 確認ダイアログ
         confirm_view = discord.ui.View(timeout=60)
-        yes_btn = discord.ui.Button(label="✅ 全て削除する", style=discord.ButtonStyle.danger)
+        yes_btn = discord.ui.Button(label="✅ 全部消去する", style=discord.ButtonStyle.danger)
         no_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.secondary)
         
         async def confirm_yes(i):
-            clear_history_user(uid)
-            await i.response.edit_message(content="✅ プレイ履歴を全て削除しました！", view=None)
+            clear_all_user_data(uid)
+            await i.response.edit_message(
+                content="✅ プレイ履歴・チャンネル情報・状態 全て消去しました！\n"
+                        "これで「自分で設定」を再び押せるようになります ✨",
+                view=None
+            )
         
         async def confirm_no(i):
             await i.response.edit_message(content="❌ キャンセルしました", view=None)
@@ -498,8 +516,21 @@ class MinesStartPanelView(discord.ui.View):
         confirm_view.add_item(yes_btn)
         confirm_view.add_item(no_btn)
         
+        status_line = []
+        if history_count > 0:
+            status_line.append(f"・プレイ履歴：{history_count}件")
+        if is_active:
+            status_line.append("・進行中のゲーム情報あり")
+        if not status_line:
+            status_line.append("・削除する情報は見つかりませんでした")
+        
         await inter.response.send_message(
-            f"⚠️ これまでのプレイ履歴 **{len(user_history)}件** を全て削除しますか？\nこの操作は取り消せません！",
+            f"⚠️ 以下の情報を全て消去しますか？\n"
+            + "\n".join(status_line) + "\n"
+            "・設定履歴\n"
+            "・チャンネル情報\n"
+            "・その他残留データ\n\n"
+            "この操作は取り消せません！",
             view=confirm_view,
             ephemeral=True
         )
