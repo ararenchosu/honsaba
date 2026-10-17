@@ -111,10 +111,20 @@ async def create_game_channel(guild: discord.Guild, user: discord.User):
     if not category:
         raise ValueError(f"カテゴリが見つかりません: {MINES_CATEGORY_ID}")
     
+    # ✅ チャンネル作成者＝ユーザーにしてBotも確実に送れる設定
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        user: discord.PermissionOverwrite(read_messages=True, send_messages=False),
-        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
+        user: discord.PermissionOverwrite(
+            read_messages=True,
+            send_messages=False,
+            read_message_history=True
+        ),
+        guild.me: discord.PermissionOverwrite(
+            read_messages=True,
+            send_messages=True,
+            manage_channels=True,
+            manage_messages=True
+        ),
     }
     for m in guild.members:
         if m.guild_permissions.administrator:
@@ -234,11 +244,24 @@ class MinesResultView(discord.ui.View):
         game_states[uid] = new_game
         new_view = MinesPlayingView(new_game)
         old_msg = message_map.get(uid)
+        
         if old_msg:
-            await old_msg.edit(embed=new_game.playing_embed(), view=new_view)
-            new_game.message = old_msg
-            message_map[uid] = old_msg
-            await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
+            try:
+                await old_msg.edit(embed=new_game.playing_embed(), view=new_view)
+                new_game.message = old_msg
+                message_map[uid] = old_msg
+                await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
+            except Exception as e:
+                # 編集失敗 → 新規送信
+                try:
+                    new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
+                    new_game.message = new_msg
+                    message_map[uid] = new_msg
+                    await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
+                except Exception as e2:
+                    game_states.pop(uid, None)
+                    await inter.response.send_message(
+                        f"❌ メッセージ送信失敗：{e2}\nカテゴリの権限を確認してください", ephemeral=True)
         else:
             try:
                 new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
@@ -246,8 +269,9 @@ class MinesResultView(discord.ui.View):
                 message_map[uid] = new_msg
                 await inter.response.send_message(f"✅ ゲーム開始 → {channel.mention}", ephemeral=True)
             except Exception as e:
-                return await inter.response.send_message(
-                    f"❌ メッセージ送信失敗：{e}", ephemeral=True)
+                game_states.pop(uid, None)
+                await inter.response.send_message(
+                    f"❌ メッセージ送信失敗：{e}\nカテゴリ権限確認してください", ephemeral=True)
 
     async def on_close(self, inter):
         if inter.user.id != self.game.user_id and not inter.user.guild_permissions.administrator:
@@ -336,6 +360,9 @@ class MinesStartPanelView(discord.ui.View):
 
 async def start_game(user, guild, bombs, bet):
     uid = user.id
+    # ✅ 古い状態を強制クリア
+    game_states.pop(uid, None)
+    
     channel = channel_map.get(uid)
     if not channel:
         channel = await create_game_channel(guild, user)
@@ -351,9 +378,9 @@ async def start_game(user, guild, bombs, bet):
         game.message = msg
         message_map[uid] = msg
     except Exception as e:
-        # メッセージ送信失敗 → 状態を消して再試行可能に
+        # ✅ 送信失敗 → 状態を消して明確に失敗を伝える
         game_states.pop(uid, None)
-        raise e
+        raise Exception(f"チャンネル作成OK → メッセージ送信失敗：{e}\nカテゴリの権限で「メッセージを送信」をオンにしてください")
 
 async def setup(tree, bot):
     pass
