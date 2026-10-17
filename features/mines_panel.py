@@ -7,7 +7,6 @@ from core.common import is_owner
 
 JST = timezone(timedelta(hours=9))
 DATA_FILE = "kn_points_data.json"
-# ✅ 指定されたカテゴリIDを直接設定
 MINES_CATEGORY_ID = 1558467161146663023
 
 # ===== ポイント読み書き =====
@@ -108,7 +107,6 @@ class MinesGame:
         return e
 
 async def create_game_channel(guild: discord.Guild, user: discord.User):
-    # ✅ 指定されたカテゴリを取得
     category = guild.get_channel(MINES_CATEGORY_ID)
     if not category:
         raise ValueError(f"カテゴリが見つかりません: {MINES_CATEGORY_ID}")
@@ -118,7 +116,6 @@ async def create_game_channel(guild: discord.Guild, user: discord.User):
         user: discord.PermissionOverwrite(read_messages=True, send_messages=False),
         guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
     }
-    # 管理者は見れるように
     for m in guild.members:
         if m.guild_permissions.administrator:
             overwrites[m] = discord.PermissionOverwrite(read_messages=True)
@@ -243,10 +240,14 @@ class MinesResultView(discord.ui.View):
             message_map[uid] = old_msg
             await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
         else:
-            new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
-            new_game.message = new_msg
-            message_map[uid] = new_msg
-            await inter.response.send_message(f"✅ ゲーム開始 → {channel.mention}", ephemeral=True)
+            try:
+                new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
+                new_game.message = new_msg
+                message_map[uid] = new_msg
+                await inter.response.send_message(f"✅ ゲーム開始 → {channel.mention}", ephemeral=True)
+            except Exception as e:
+                return await inter.response.send_message(
+                    f"❌ メッセージ送信失敗：{e}", ephemeral=True)
 
     async def on_close(self, inter):
         if inter.user.id != self.game.user_id and not inter.user.guild_permissions.administrator:
@@ -343,10 +344,16 @@ async def start_game(user, guild, bombs, bet):
     game = MinesGame(user, bombs, bet)
     game.channel = channel
     game_states[uid] = game
+    
     view = MinesPlayingView(game)
-    msg = await channel.send(embed=game.playing_embed(), view=view)
-    game.message = msg
-    message_map[uid] = msg
+    try:
+        msg = await channel.send(embed=game.playing_embed(), view=view)
+        game.message = msg
+        message_map[uid] = msg
+    except Exception as e:
+        # メッセージ送信失敗 → 状態を消して再試行可能に
+        game_states.pop(uid, None)
+        raise e
 
 async def setup(tree, bot):
     pass
