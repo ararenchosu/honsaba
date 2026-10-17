@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 import random
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from core.common import is_owner
 
@@ -9,69 +10,48 @@ JST = timezone(timedelta(hours=9))
 DATA_FILE = "kn_points_data.json"
 MINES_CATEGORY_ID = 1558467161146663023
 
-def load_points_all():
-    if not os.path.exists(DATA_FILE):
-        return {"points": {}}
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            import json
-            data = json.load(f)
-            if "points" not in data:
-                data["points"] = {}
-            return data
-    except Exception:
-        return {"points": {}}
-
-def save_points_all(data):
-    try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            import json
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-def get_point_value(user_id):
-    return load_points_all()["points"].get(str(user_id), 0)
-
-def add_point_value(user_id, amount):
-    data = load_points_all()
-    uid = str(user_id)
-    data["points"][uid] = data["points"].get(uid, 0) + amount
-    save_points_all(data)
-    return data["points"][uid]
-
-# ==========================================================
-# 🔥 超絶高倍率設定 🔥
-# ==========================================================
-FINAL_MULTIPLIER = {
-     1:    25.0,   # 1個  → 25倍
-     2:    40.0,   # 2個  → 40倍
-     3:    65.0,   # 3個  → 65倍
-     4:   100.0,   # 4個  → 100倍
-     5:   160.0,   # 5個  → 160倍
-     6:   260.0,   # 6個  → 260倍
-     7:   420.0,   # 7個  → 420倍
-     8:   680.0,   # 8個  → 680倍
-     9:  1100.0,   # 9個  → 1,100倍
-    10:  1800.0,   # 10個 → 1,800倍
-    11:  3000.0,   # 11個 → 3,000倍
-    12:  5000.0,   # 12個 → 5,000倍
-    13:  8500.0,   # 13個 → 8,500倍
-    14: 15000.0,   # 14個 → 15,000倍
-    15: 27000.0,   # 15個 → 27,000倍
-    16: 50000.0,   # 16個 → 50,000倍
-    17: 100000.0,  # 17個 → 10万倍
-    18: 250000.0,  # 18個 → 25万倍
-    19: 600000.0,  # 19個 → 60万倍
-    20:  2000000.0, # 20個 → 200万倍
-    21:  8000000.0, # 21個 → 800万倍
-    22: 35000000.0, # 22個 → 3,500万倍
-    23: 200000000.0,# 23個 → 2億倍
-    24: 5000000000.0,# 24個 → 50億倍 💥
+# ✅ 単位 → 数値 変換テーブル
+UNIT_SCALE = {
+    "無量大数": 10**68,
+    "那由多": 10**64,
+    "不可思議": 10**60,
+    "阿僧祇": 10**56,
+    "恒河沙": 10**52,
+    "極": 10**48,
+    "載": 10**44,
+    "正": 10**40,
+    "澗": 10**36,
+    "溝": 10**32,
+    "穣": 10**28,
+    "垓": 10**24,
+    "京": 10**20,
+    "兆": 10**16,
+    "億": 10**12,
+    "万": 10**8,
 }
 
-# ✅ 単位表示フォーマット：万 ～ 無量大数
+def parse_value(input_str: str):
+    """「1.5京」→ 数値 に変換"""
+    s = input_str.strip()
+    # 数字部分を抽出
+    match = re.match(r"([0-9]*\.?[0-9]+)\s*([^\d\s]*)", s)
+    if not match:
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    num_str = match.group(1)
+    unit = match.group(2)
+    try:
+        num = float(num_str)
+    except ValueError:
+        return None
+    if unit in UNIT_SCALE:
+        return num * UNIT_SCALE[unit]
+    return num
+
 def format_value(val):
+    """数値 → 単位付き文字列 に変換"""
     val = float(val)
     units = [
         ("無量大数", 10**68),
@@ -120,6 +100,64 @@ def format_mul(val):
         if val >= scale:
             return f"{val / scale:.2f} {name}倍"
     return f"{val:.1f}倍"
+
+def load_points_all():
+    if not os.path.exists(DATA_FILE):
+        return {"points": {}}
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            import json
+            data = json.load(f)
+            if "points" not in data:
+                data["points"] = {}
+            return data
+    except Exception:
+        return {"points": {}}
+
+def save_points_all(data):
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            import json
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def get_point_value(user_id):
+    return load_points_all()["points"].get(str(user_id), 0)
+
+def add_point_value(user_id, amount):
+    data = load_points_all()
+    uid = str(user_id)
+    data["points"][uid] = data["points"].get(uid, 0) + amount
+    save_points_all(data)
+    return data["points"][uid]
+
+FINAL_MULTIPLIER = {
+     1:    25.0,
+     2:    40.0,
+     3:    65.0,
+     4:   100.0,
+     5:   160.0,
+     6:   260.0,
+     7:   420.0,
+     8:   680.0,
+     9:  1100.0,
+    10:  1800.0,
+    11:  3000.0,
+    12:  5000.0,
+    13:  8500.0,
+    14: 15000.0,
+    15: 27000.0,
+    16: 50000.0,
+    17: 100000.0,
+    18: 250000.0,
+    19: 600000.0,
+    20:  2000000.0,
+    21:  8000000.0,
+    22: 35000000.0,
+    23: 200000000.0,
+    24: 5000000000.0,
+}
 
 def calc_step_multiplier(bombs: int, opened: int):
     safe = 25 - bombs
@@ -252,7 +290,8 @@ class MinesBoardView(discord.ui.View):
             add_point_value(g.user_id, -g.bet)
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
             game_states.pop(g.user_id, None)
-            embed = g.result_embed("💣 爆弾！", f"🔹 賭け：{format_value(g.bet)}\n🔹 結果：-{format_value(g.bet)}", 0xE74C3C)
+            embed = g.result_embed("💣 爆弾！", 
+                f"🔹 賭け：{format_value(g.bet)}\n🔹 結果：-{format_value(g.bet)}", 0xE74C3C)
             try:
                 await inter.response.edit_message(embed=embed, view=MinesResultView(g))
                 if g.control_message:
@@ -401,19 +440,19 @@ class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v4_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v5_easy")
     async def easy(self, inter, btn):
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v4_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v5_normal")
     async def normal(self, inter, btn):
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v4_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v5_hard")
     async def hard(self, inter, btn):
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v4_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v5_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
@@ -421,8 +460,8 @@ class MinesStartPanelView(discord.ui.View):
         bal = get_point_value(uid)
         class BetInputModal(discord.ui.Modal, title="💎 自分で設定"):
             bet_in = discord.ui.TextInput(
-                label=f"賭けるポイント（保有：{format_value(bal)}）",
-                placeholder="例：1000",
+                label=f"賭けるポイント（例：1.5京 / 10兆 / 500億）\n保有：{format_value(bal)}",
+                placeholder="例：1京",
                 required=True
             )
             bomb_in = discord.ui.TextInput(
@@ -431,14 +470,16 @@ class MinesStartPanelView(discord.ui.View):
                 required=True
             )
             async def on_submit(s, m):
-                try:
-                    bet_val = int(s.bet_in.value.strip())
-                    bomb_val = int(s.bomb_in.value.strip())
-                except:
-                    return await m.response.send_message("❌ 数字を入力してください", ephemeral=True)
+                bet_val = parse_value(s.bet_in.value)
+                bomb_val = parse_value(s.bomb_in.value)
+                if bet_val is None or bomb_val is None:
+                    return await m.response.send_message(
+                        "❌ 入力形式が正しくありません\n例：1京 / 5000 / 2.5兆", ephemeral=True)
+                bet_val = int(bet_val)
+                bomb_val = int(bomb_val)
                 if bet_val <= 0 or bet_val > bal:
                     return await m.response.send_message(
-                        f"❌ ポイントが足りません\n保有：{format_value(bal)}", ephemeral=True)
+                        f"❌ ポイントが足りません\n賭け額：{format_value(bet_val)}\n保有：{format_value(bal)}", ephemeral=True)
                 if bomb_val < 1 or bomb_val > 24:
                     return await m.response.send_message(
                         "❌ 爆弾の数は1～24で指定してください", ephemeral=True)
@@ -454,18 +495,19 @@ class MinesStartPanelView(discord.ui.View):
         bal = get_point_value(uid)
         class BetModal(discord.ui.Modal, title=f"💎 爆弾{bombs}個"):
             bet_in = discord.ui.TextInput(
-                label=f"🔥 最大倍率：{mul}\n賭けるポイント",
+                label=f"🔥 最大倍率：{mul}\n賭けるポイント（例：1京 / 10兆）",
                 placeholder="例：1000",
                 required=True
             )
             async def on_submit(s, m):
-                try:
-                    val = int(s.bet_in.value.strip())
-                except:
-                    return await m.response.send_message("❌ 数字を入力してください", ephemeral=True)
+                val = parse_value(s.bet_in.value)
+                if val is None:
+                    return await m.response.send_message(
+                        "❌ 入力形式が正しくありません\n例：1京 / 5000 / 2.5兆", ephemeral=True)
+                val = int(val)
                 if val <= 0 or val > bal:
                     return await m.response.send_message(
-                        f"❌ ポイントが足りません\n保有：{format_value(bal)}", ephemeral=True)
+                        f"❌ ポイントが足りません\n賭け額：{format_value(val)}\n保有：{format_value(bal)}", ephemeral=True)
                 await start_game(m.user, m.guild, bombs, val)
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetModal())
