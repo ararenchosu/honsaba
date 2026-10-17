@@ -50,7 +50,7 @@ def calc_step_multiplier(bombs: int, opened: int):
     return round(1.0 + (FINAL_MULTIPLIER[bombs] - 1.0) * ratio ** 1.5, 2)
 
 active_games = {}
-user_bomb_selection = {}  # {user_id: {"page": 0, "selected": None}}
+user_bomb_selection = {}
 
 class MinesGameView(discord.ui.View):
     def __init__(self, user_id: int, bombs: int, bet: int):
@@ -133,17 +133,14 @@ class MinesGameView(discord.ui.View):
 BOMBS_PER_PAGE = 8
 
 class BombsSelectView(discord.ui.View):
-    # ✅ 引数なしで永続登録できるように修正
     def __init__(self):
         super().__init__(timeout=None)
 
     def render_for_user(self, user_id: int):
-        """ユーザーの状態に合わせてボタンを再構成"""
         self.clear_items()
         state = user_bomb_selection.get(user_id, {"page": 0, "selected": None})
         page = state["page"]
         selected = state["selected"]
-
         start = page * BOMBS_PER_PAGE + 1
         end = min(24, start + BOMBS_PER_PAGE - 1)
         for n in range(start, end + 1):
@@ -229,21 +226,20 @@ class MinesStartPanelView(discord.ui.View):
 
 async def setup(tree, bot):
     if not hasattr(bot, "_mines_views_ready"):
-        # ✅ 引数なしで登録 → エラー解消
         bot.add_view(MinesStartPanelView())
         bot.add_view(BombsSelectView())
         bot._mines_views_ready = True
         print("✅ mines_panel 永久View登録完了")
 
-    GUILD_ID = 1542788841465978880
-
+    # ✅ グローバルコマンドに変更 → どのサーバーでも表示
     @tree.command(
         name="マインズパネル設置",
-        description="💎 マインス パネルを設置",
-        guild=discord.Object(id=GUILD_ID)
+        description="💎 マインス パネルを設置"
     )
-    @app_commands.check(is_owner)
     async def setup_panel(inter):
+        # ✅ 実行時に所有者チェック → コマンド自体は表示される
+        if not await is_owner(inter):
+            return await inter.response.send_message("❌ 管理者のみ実行可能", ephemeral=True)
         e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
         e.description = (
             "爆弾を避けて金塊を集め、好きなタイミングで回収！\n"
