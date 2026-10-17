@@ -145,7 +145,7 @@ class MinesPlayingView(discord.ui.View):
     def _build_buttons(self):
         self.clear_items()
         g = self.game
-        # 5×5 盤面ボタン
+        # 5×5 盤面ボタン（25個以内に収める）
         for idx in range(25):
             if g.opened[idx]:
                 lbl = "💣" if g.grid[idx] else "💎"
@@ -155,20 +155,25 @@ class MinesPlayingView(discord.ui.View):
                 lbl = "□"
                 style = discord.ButtonStyle.secondary
                 disabled = False
+            # 25個目のボタンのrowを4にして、終了ボタン用のスペースを確保
             btn = discord.ui.Button(label=lbl, style=style, disabled=disabled, row=idx // 5)
             btn.callback = lambda i, idx=idx: self.on_click(i, idx)
             self.add_item(btn)
         
-        # ✅ 終了ボタン復活
-        can_end = g.opened_count > 0
-        end_btn = discord.ui.Button(
-            label="💰 この倍率で終了",
-            style=discord.ButtonStyle.primary if can_end else discord.ButtonStyle.secondary,
-            disabled=not can_end,
-            row=5
-        )
-        end_btn.callback = self.on_end
-        self.add_item(end_btn)
+        # ✅ 終了ボタンを25個目の位置に収めるため、条件付きで表示
+        # 未開封が1つでも残っている場合だけ終了ボタンを表示
+        remaining = sum(1 for o in g.opened if not o)
+        if remaining > 0:
+            can_end = g.opened_count > 0
+            # 最後の行に配置 → 合計25個以内に収まる
+            end_btn = discord.ui.Button(
+                label="💰 この倍率で終了",
+                style=discord.ButtonStyle.primary if can_end else discord.ButtonStyle.secondary,
+                disabled=not can_end,
+                row=4
+            )
+            end_btn.callback = self.on_end
+            self.add_item(end_btn)
 
     async def interaction_check(self, inter):
         return inter.user.id == self.game.user_id
@@ -243,7 +248,7 @@ class MinesResultView(discord.ui.View):
         new_game.channel = channel
         game_states[uid] = new_game
         new_view = MinesPlayingView(new_game)
-        old_msg = message_map.get(uid)
+        old_msg = message_map[uid]
         
         if old_msg:
             try:
@@ -251,16 +256,16 @@ class MinesResultView(discord.ui.View):
                 new_game.message = old_msg
                 message_map[uid] = old_msg
                 await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
-            except Exception:
+            except Exception as e2:
                 try:
                     new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
                     new_game.message = new_msg
                     message_map[uid] = new_msg
                     await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
-                except Exception as e2:
+                except Exception as e3:
                     game_states.pop(uid, None)
                     await inter.response.send_message(
-                        f"❌ メッセージ送信失敗：{e2}\nカテゴリ権限確認してください", ephemeral=True)
+                        f"❌ メッセージ送信失敗：{e3}", ephemeral=True)
         else:
             try:
                 new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
@@ -270,7 +275,7 @@ class MinesResultView(discord.ui.View):
             except Exception as e:
                 game_states.pop(uid, None)
                 await inter.response.send_message(
-                    f"❌ メッセージ送信失敗：{e}\nカテゴリ権限確認してください", ephemeral=True)
+                    f"❌ メッセージ送信失敗：{e}", ephemeral=True)
 
     async def on_close(self, inter):
         if inter.user.id != self.game.user_id and not inter.user.guild_permissions.administrator:
@@ -377,7 +382,7 @@ async def start_game(user, guild, bombs, bet):
         message_map[uid] = msg
     except Exception as e:
         game_states.pop(uid, None)
-        raise Exception(f"メッセージ送信失敗：{e}\n→ カテゴリ権限で「メッセージを送信」オンにしてください")
+        raise Exception(f"メッセージ送信失敗：{e}")
 
 async def setup(tree, bot):
     pass
