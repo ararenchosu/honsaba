@@ -5,10 +5,54 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from core.common import is_owner
-
 JST = timezone(timedelta(hours=9))
 PANEL_TABLE = "ranking_panels"
 DATA_FILE = "kn_points_data.json"
+
+# ========== ポイントを日本語表記に変換 — 最大・無量大数まで ==========
+def format_points_jp(points: int) -> str:
+    """
+    日本の大数の単位で最大・無量大数まで表示
+    万 → 億 → 兆 → 京 → 垓 → 𥝱 → 穣 → 溝 → 澗 → 正 → 載 → 極 →
+    恒河沙 → 阿僧祇 → 那由他 → 不可思議 → 無量大数
+    """
+    if points < 10000:
+        return f"{points:,}P"
+    
+    # 上から順に判定：10^4 ～ 10^68（無量大数）まで
+    units = [
+        (10**68, "無量大数"),
+        (10**64, "不可思議"),
+        (10**60, "那由他"),
+        (10**56, "阿僧祇"),
+        (10**52, "恒河沙"),
+        (10**48, "極"),
+        (10**44, "載"),
+        (10**40, "正"),
+        (10**36, "澗"),
+        (10**32, "溝"),
+        (10**28, "穣"),
+        (10**24, "𥝱"),
+        (10**20, "垓"),
+        (10**16, "京"),
+        (10**12, "兆"),
+        (10**8,  "億"),
+        (10**4,  "万"),
+    ]
+    
+    result = ""
+    remaining = points
+    
+    for scale, name in units:
+        if remaining >= scale:
+            val = remaining // scale
+            result += f"{val:,}{name}"
+            remaining = remaining % scale
+    
+    if remaining > 0:
+        result += f"{remaining:,}"
+    
+    return f"{result}P"
 
 # ========== データ読み込み ==========
 def load_points_data():
@@ -91,7 +135,8 @@ def build_ranking_embed(title, description, guild: discord.Guild):
         user = guild.get_member(int(uid))
         name = user.mention if user else f"ユーザーID:{uid}"
         prefix = medals[idx-1] if idx <= 3 else f" {idx}."
-        lines.append(f"{prefix} {name} ・・・ **{pts:,}P**")
+        pts_text = format_points_jp(pts)
+        lines.append(f"{prefix} {name} ・・・ **{pts_text}**")
     if not lines:
         lines.append("まだポイントが記録されていません")
     embed = discord.Embed(
@@ -204,7 +249,6 @@ async def setup_panel(channel):
     msg = await channel.send(embed=embed, view=view)
     save_panel(channel.id, msg.id, title, desc)
 
-# ✅ 引数をbot=Noneに統一
 async def setup(tree: app_commands.CommandTree, bot=None):
     init_db()
     
