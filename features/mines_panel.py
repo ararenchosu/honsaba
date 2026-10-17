@@ -145,7 +145,7 @@ class MinesPlayingView(discord.ui.View):
     def _build_buttons(self):
         self.clear_items()
         g = self.game
-        # 5×5 盤面ボタンだけ表示
+        # 5×5 盤面ボタン
         for idx in range(25):
             if g.opened[idx]:
                 lbl = "💣" if g.grid[idx] else "💎"
@@ -159,11 +159,16 @@ class MinesPlayingView(discord.ui.View):
             btn.callback = lambda i, idx=idx: self.on_click(i, idx)
             self.add_item(btn)
         
-        # ✅ 確認用：終了ボタンは一旦コメントアウト
-        # can_end = g.opened_count > 0
-        # end_btn = discord.ui.Button(label="💰 この倍率で終了", ...)
-        # end_btn.callback = self.on_end
-        # self.add_item(end_btn)
+        # ✅ 終了ボタン復活
+        can_end = g.opened_count > 0
+        end_btn = discord.ui.Button(
+            label="💰 この倍率で終了",
+            style=discord.ButtonStyle.primary if can_end else discord.ButtonStyle.secondary,
+            disabled=not can_end,
+            row=5
+        )
+        end_btn.callback = self.on_end
+        self.add_item(end_btn)
 
     async def interaction_check(self, inter):
         return inter.user.id == self.game.user_id
@@ -184,6 +189,19 @@ class MinesPlayingView(discord.ui.View):
             g.opened_count += 1
             g.multiplier = calc_step_multiplier(g.bombs, g.opened_count)
             await inter.response.edit_message(embed=g.playing_embed(), view=MinesPlayingView(g))
+
+    async def on_end(self, inter):
+        g = self.game
+        if g.game_over or g.opened_count == 0:
+            return await inter.response.defer()
+        g.game_over = True
+        win = int(g.bet * g.multiplier)
+        add_point_value(g.user_id, win)
+        last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
+        game_states.pop(g.user_id, None)
+        embed = g.result_embed("💰 回収完了！",
+            f"🔹 賭け：{g.bet:,}pt\n🔹 確定倍率：{g.multiplier}倍\n🔹 獲得：+{win:,}pt", 0x2ECC71)
+        await inter.response.edit_message(embed=embed, view=MinesResultView(g))
 
 class MinesResultView(discord.ui.View):
     def __init__(self, game: MinesGame):
@@ -242,7 +260,7 @@ class MinesResultView(discord.ui.View):
                 except Exception as e2:
                     game_states.pop(uid, None)
                     await inter.response.send_message(
-                        f"❌ メッセージ送信失敗：{e2}\nカテゴリ権限で「メッセージを送信」をオンにしてください", ephemeral=True)
+                        f"❌ メッセージ送信失敗：{e2}\nカテゴリ権限確認してください", ephemeral=True)
         else:
             try:
                 new_msg = await channel.send(embed=new_game.playing_embed(), view=new_view)
