@@ -225,7 +225,7 @@ async def on_close():
         set_reason("update")
 
 # ==================================================
-# 🔵 Bot2：サブBot — ✅ マインス追加 & check_view_no_args 追加
+# 🔵 Bot2：サブBot — ✅ マインス専用
 # ==================================================
 TOKEN_SUB = os.getenv("DISCORD_TOKEN_SUB")
 bot_sub = None
@@ -244,7 +244,7 @@ if TOKEN_SUB:
         print(f"\n========== サブBot 起動 ==========")
         print(f"✅ ログイン：{bot_sub.user}")
 
-        # ✅ サブBot用：引数チェック関数
+        # ✅ 引数チェック関数
         def check_view_no_args(view_class, view_name: str):
             try:
                 instance = view_class()
@@ -259,6 +259,7 @@ if TOKEN_SUB:
         all_ok_sub = True
         try:
             from features.mines_panel import MinesStartPanelView, BombsSelectView
+            # ✅ 引数なしでインスタンス化できるViewのみ登録
             views_to_register_sub = [
                 (MinesStartPanelView, "MinesStartPanelView"),
                 (BombsSelectView, "BombsSelectView"),
