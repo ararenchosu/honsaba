@@ -3,11 +3,13 @@ from discord import app_commands
 import random
 import os
 import re
+import json
 from datetime import datetime, timedelta, timezone
 from core.common import is_owner
 
 JST = timezone(timedelta(hours=9))
 DATA_FILE = "kn_points_data.json"
+HISTORY_FILE = "mines_history.json"
 MINES_CATEGORY_ID = 1558467161146663023
 
 # ✅ 単位 → 数値 変換テーブル
@@ -31,9 +33,7 @@ UNIT_SCALE = {
 }
 
 def parse_value(input_str: str):
-    """「1.5京」→ 数値 に変換"""
     s = input_str.strip()
-    # 数字部分を抽出
     match = re.match(r"([0-9]*\.?[0-9]+)\s*([^\d\s]*)", s)
     if not match:
         try:
@@ -51,25 +51,13 @@ def parse_value(input_str: str):
     return num
 
 def format_value(val):
-    """数値 → 単位付き文字列 に変換"""
     val = float(val)
     units = [
-        ("無量大数", 10**68),
-        ("那由多", 10**64),
-        ("不可思議", 10**60),
-        ("阿僧祇", 10**56),
-        ("恒河沙", 10**52),
-        ("極", 10**48),
-        ("載", 10**44),
-        ("正", 10**40),
-        ("澗", 10**36),
-        ("溝", 10**32),
-        ("穣", 10**28),
-        ("垓", 10**24),
-        ("京", 10**20),
-        ("兆", 10**16),
-        ("億", 10**12),
-        ("万", 10**8),
+        ("無量大数", 10**68), ("那由多", 10**64), ("不可思議", 10**60),
+        ("阿僧祇", 10**56), ("恒河沙", 10**52), ("極", 10**48),
+        ("載", 10**44), ("正", 10**40), ("澗", 10**36),
+        ("溝", 10**32), ("穣", 10**28), ("垓", 10**24),
+        ("京", 10**20), ("兆", 10**16), ("億", 10**12), ("万", 10**8),
     ]
     for name, scale in units:
         if val >= scale:
@@ -79,22 +67,11 @@ def format_value(val):
 def format_mul(val):
     val = float(val)
     units = [
-        ("無量大数", 10**68),
-        ("那由多", 10**64),
-        ("不可思議", 10**60),
-        ("阿僧祇", 10**56),
-        ("恒河沙", 10**52),
-        ("極", 10**48),
-        ("載", 10**44),
-        ("正", 10**40),
-        ("澗", 10**36),
-        ("溝", 10**32),
-        ("穣", 10**28),
-        ("垓", 10**24),
-        ("京", 10**20),
-        ("兆", 10**16),
-        ("億", 10**12),
-        ("万", 10**8),
+        ("無量大数", 10**68), ("那由多", 10**64), ("不可思議", 10**60),
+        ("阿僧祇", 10**56), ("恒河沙", 10**52), ("極", 10**48),
+        ("載", 10**44), ("正", 10**40), ("澗", 10**36),
+        ("溝", 10**32), ("穣", 10**28), ("垓", 10**24),
+        ("京", 10**20), ("兆", 10**16), ("億", 10**12), ("万", 10**8),
     ]
     for name, scale in units:
         if val >= scale:
@@ -106,7 +83,6 @@ def load_points_all():
         return {"points": {}}
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            import json
             data = json.load(f)
             if "points" not in data:
                 data["points"] = {}
@@ -117,7 +93,6 @@ def load_points_all():
 def save_points_all(data):
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
-            import json
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
@@ -132,31 +107,52 @@ def add_point_value(user_id, amount):
     save_points_all(data)
     return data["points"][uid]
 
+# ===== ✅ 履歴管理 =====
+def load_history(user_id=None):
+    if not os.path.exists(HISTORY_FILE):
+        return []
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            all_data = json.load(f)
+            if user_id:
+                return [h for h in all_data if h.get("user_id") == user_id]
+            return all_data
+    except Exception:
+        return []
+
+def save_history_entry(entry):
+    all_data = load_history()
+    all_data.insert(0, entry)  # 新しい順
+    all_data = all_data[:200]   # 最大200件まで保持
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(all_data, f, ensure_ascii=False, indent=2)
+
+def delete_history_entry(index):
+    all_data = load_history()
+    if 0 <= index < len(all_data):
+        all_data.pop(index)
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(all_data, f, ensure_ascii=False, indent=2)
+        return True
+    return False
+
+def clear_history_user(user_id):
+    all_data = load_history()
+    all_data = [h for h in all_data if h.get("user_id") != user_id]
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(all_data, f, ensure_ascii=False, indent=2)
+    return True
+
+def clear_history_all():
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump([], f)
+    return True
+
 FINAL_MULTIPLIER = {
-     1:    25.0,
-     2:    40.0,
-     3:    65.0,
-     4:   100.0,
-     5:   160.0,
-     6:   260.0,
-     7:   420.0,
-     8:   680.0,
-     9:  1100.0,
-    10:  1800.0,
-    11:  3000.0,
-    12:  5000.0,
-    13:  8500.0,
-    14: 15000.0,
-    15: 27000.0,
-    16: 50000.0,
-    17: 100000.0,
-    18: 250000.0,
-    19: 600000.0,
-    20:  2000000.0,
-    21:  8000000.0,
-    22: 35000000.0,
-    23: 200000000.0,
-    24: 5000000000.0,
+     1: 25.0, 2: 40.0, 3: 65.0, 4: 100.0, 5: 160.0, 6: 260.0, 7: 420.0, 8: 680.0,
+     9: 1100.0, 10: 1800.0, 11: 3000.0, 12: 5000.0, 13: 8500.0, 14: 15000.0,
+    15: 27000.0, 16: 50000.0, 17: 100000.0, 18: 250000.0, 19: 600000.0,
+    20: 2000000.0, 21: 8000000.0, 22: 35000000.0, 23: 200000000.0, 24: 5000000000.0,
 }
 
 def calc_step_multiplier(bombs: int, opened: int):
@@ -224,32 +220,18 @@ async def create_game_channel(guild: discord.Guild, user: discord.User):
     category = guild.get_channel(MINES_CATEGORY_ID)
     if not category:
         raise ValueError(f"カテゴリが見つかりません: {MINES_CATEGORY_ID}")
-    
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        user: discord.PermissionOverwrite(
-            read_messages=True,
-            send_messages=False,
-            read_message_history=True
-        ),
-        guild.me: discord.PermissionOverwrite(
-            read_messages=True,
-            send_messages=True,
-            manage_channels=True,
-            manage_messages=True
-        ),
+        user: discord.PermissionOverwrite(read_messages=True, send_messages=False, read_message_history=True),
+        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True, manage_messages=True),
     }
     for m in guild.members:
         if m.guild_permissions.administrator:
             overwrites[m] = discord.PermissionOverwrite(read_messages=True)
-    
-    channel = await guild.create_text_channel(
-        name=f"マインズ-{user.name}",
-        category=category,
-        overwrites=overwrites,
-        reason="マインズゲーム用"
+    return await guild.create_text_channel(
+        name=f"マインズ-{user.name}", category=category,
+        overwrites=overwrites, reason="マインズゲーム用"
     )
-    return channel
 
 class MinesBoardView(discord.ui.View):
     def __init__(self, game: MinesGame):
@@ -282,48 +264,65 @@ class MinesBoardView(discord.ui.View):
         g = self.game
         if g.game_over or g.opened[idx]:
             return await inter.response.defer(ephemeral=True)
-        
         g.opened[idx] = True
-        
+
         if g.grid[idx]:
             g.game_over = True
             add_point_value(g.user_id, -g.bet)
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
             game_states.pop(g.user_id, None)
+            save_history_entry({
+                "user_id": g.user_id,
+                "time": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+                "bombs": g.bombs,
+                "bet": g.bet,
+                "result": "lose",
+                "amount": -g.bet,
+                "multiplier": format_mul(g.multiplier)
+            })
             embed = g.result_embed("💣 爆弾！", 
                 f"🔹 賭け：{format_value(g.bet)}\n🔹 結果：-{format_value(g.bet)}", 0xE74C3C)
             try:
                 await inter.response.edit_message(embed=embed, view=MinesResultView(g))
                 if g.control_message:
                     await g.control_message.delete()
-            except (discord.NotFound, discord.HTTPException):
+            except Exception:
                 pass
             return
-        
+
         g.opened_count += 1
         g.multiplier = calc_step_multiplier(g.bombs, g.opened_count)
-        
+
         if g.check_all_opened():
             g.game_over = True
             win = int(g.bet * g.multiplier)
             add_point_value(g.user_id, win)
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
             game_states.pop(g.user_id, None)
+            save_history_entry({
+                "user_id": g.user_id,
+                "time": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+                "bombs": g.bombs,
+                "bet": g.bet,
+                "result": "win",
+                "amount": win,
+                "multiplier": format_mul(g.multiplier)
+            })
             embed = g.result_embed("🎉 全開け！",
                 f"🔹 賭け：{format_value(g.bet)}\n🔹 確定倍率：{format_mul(g.multiplier)}\n🔹 獲得：+{format_value(win)}", 0xFFD700)
             try:
                 await inter.response.edit_message(embed=embed, view=MinesResultView(g))
                 if g.control_message:
                     await g.control_message.delete()
-            except (discord.NotFound, discord.HTTPException):
+            except Exception:
                 pass
             return
-        
+
         try:
             await inter.response.edit_message(embed=g.playing_embed(), view=MinesBoardView(g))
             if g.control_message:
                 await g.control_message.edit(view=MinesControlView(g))
-        except (discord.NotFound, discord.HTTPException):
+        except Exception:
             pass
 
 class MinesControlView(discord.ui.View):
@@ -358,13 +357,22 @@ class MinesControlView(discord.ui.View):
         add_point_value(g.user_id, win)
         last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
         game_states.pop(g.user_id, None)
+        save_history_entry({
+            "user_id": g.user_id,
+            "time": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+            "bombs": g.bombs,
+            "bet": g.bet,
+            "result": "cashout",
+            "amount": win,
+            "multiplier": format_mul(g.multiplier)
+        })
         embed = g.result_embed("💰 回収完了！",
             f"🔹 賭け：{format_value(g.bet)}\n🔹 確定倍率：{format_mul(g.multiplier)}\n🔹 獲得：+{format_value(win)}", 0x2ECC71)
         try:
             if g.message:
                 await g.message.edit(embed=embed, view=MinesResultView(g))
             await inter.response.edit_message(content="✅ 終了しました", view=None)
-        except (discord.NotFound, discord.HTTPException):
+        except Exception:
             pass
 
 class MinesResultView(discord.ui.View):
@@ -391,7 +399,6 @@ class MinesResultView(discord.ui.View):
         if setting["bet"] > bal:
             return await inter.response.send_message(
                 f"❌ ポイントが足りません\n賭け額：{format_value(setting['bet'])}\n保有：{format_value(bal)}", ephemeral=True)
-        
         channel = channel_map.get(uid)
         if not channel:
             try:
@@ -399,23 +406,18 @@ class MinesResultView(discord.ui.View):
                 channel_map[uid] = channel
             except Exception as e:
                 return await inter.response.send_message(f"❌ チャンネル作成失敗：{e}", ephemeral=True)
-        
         new_game = MinesGame(inter.user, setting["bombs"], setting["bet"])
         new_game.channel = channel
         game_states[uid] = new_game
-        
         board_view = MinesBoardView(new_game)
         control_view = MinesControlView(new_game)
-        
         try:
             board_msg = await channel.send(embed=new_game.playing_embed(), view=board_view)
             new_game.message = board_msg
             message_map[uid] = board_msg
-            
             control_msg = await channel.send("👇 操作ボタン", view=control_view)
             new_game.control_message = control_msg
             control_message_map[uid] = control_msg
-            
             await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
         except Exception as e:
             game_states.pop(uid, None)
@@ -428,31 +430,119 @@ class MinesResultView(discord.ui.View):
         control_message_map.pop(uid, None)
         game_states.pop(uid, None)
         last_settings.pop(uid, None)
-        
         try:
             if c:
                 await c.delete(reason="ゲーム終了")
             await inter.response.send_message("✅ チャンネルを閉じました", ephemeral=True)
-        except (discord.NotFound, discord.HTTPException):
+        except Exception:
             pass
+
+# ===== ✅ 履歴表示・削除用View =====
+class HistoryView(discord.ui.View):
+    def __init__(self, user_id, page=0):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.page = page
+        self.per_page = 5
+        self.history = load_history(user_id)
+        self.total_pages = (len(self.history) - 1) // self.per_page + 1 if self.history else 1
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_items = self.history[start:end]
+
+        for idx, item in enumerate(page_items):
+            label = f"{start+idx+1}. {item['time']} | {item['bombs']}個"
+            if item["result"] == "lose":
+                style = discord.ButtonStyle.red
+            elif item["result"] == "cashout":
+                style = discord.ButtonStyle.primary
+            else:
+                style = discord.ButtonStyle.green
+            btn = discord.ui.Button(label=label, style=style, row=idx)
+            btn.callback = lambda i, idx_=start+idx: self.on_delete(i, idx_)
+            self.add_item(btn)
+
+        prev_btn = discord.ui.Button(label="◀ 前", style=discord.ButtonStyle.secondary, disabled=self.page <= 0, row=5)
+        prev_btn.callback = self.on_prev
+        self.add_item(prev_btn)
+
+        page_label = discord.ui.Button(label=f"{self.page+1}/{self.total_pages}", style=discord.ButtonStyle.grey, disabled=True, row=5)
+        self.add_item(page_label)
+
+        next_btn = discord.ui.Button(label="次 ▶", style=discord.ButtonStyle.secondary, disabled=self.page+1 >= self.total_pages, row=5)
+        next_btn.callback = self.on_next
+        self.add_item(next_btn)
+
+        clear_btn = discord.ui.Button(label="🗑️ 全履歴削除", style=discord.ButtonStyle.danger, row=6)
+        clear_btn.callback = self.on_clear
+        self.add_item(clear_btn)
+
+    async def on_prev(self, inter):
+        self.page -= 1
+        self._update_buttons()
+        await inter.response.edit_message(view=self)
+
+    async def on_next(self, inter):
+        self.page += 1
+        self._update_buttons()
+        await inter.response.edit_message(view=self)
+
+    async def on_delete(self, inter, idx):
+        confirm_view = discord.ui.View(timeout=60)
+        yes = discord.ui.Button(label="✅ 削除する", style=discord.ButtonStyle.danger)
+        no = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.secondary)
+        async def cb_yes(i):
+            delete_history_entry(idx)
+            self.history = load_history(self.user_id)
+            self._update_buttons()
+            await i.response.edit_message(content="✅ 削除しました", view=self)
+        async def cb_no(i):
+            await i.response.edit_message(content="❌ キャンセルしました", view=None)
+        yes.callback = cb_yes
+        no.callback = cb_no
+        confirm_view.add_item(yes)
+        confirm_view.add_item(no)
+        await inter.response.send_message(
+            f"⚠️ この履歴を削除しますか？\n{self.history[idx]['time']} | {format_value(self.history[idx]['bet'])} | {self.history[idx]['multiplier']}",
+            view=confirm_view, ephemeral=True
+        )
+
+    async def on_clear(self, inter):
+        confirm_view = discord.ui.View(timeout=60)
+        yes = discord.ui.Button(label="✅ 全て削除", style=discord.ButtonStyle.danger)
+        no = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.secondary)
+        async def cb_yes(i):
+            clear_history_user(self.user_id)
+            await i.response.edit_message(content="✅ 全ての履歴を削除しました", view=None)
+        async def cb_no(i):
+            await i.response.edit_message(content="❌ キャンセルしました", view=None)
+        yes.callback = cb_yes
+        no.callback = cb_no
+        confirm_view.add_item(yes)
+        confirm_view.add_item(no)
+        await inter.response.send_message("⚠️ これまでの履歴を全て削除しますか？", view=confirm_view, ephemeral=True)
 
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v5_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v6_easy")
     async def easy(self, inter, btn):
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v5_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v6_normal")
     async def normal(self, inter, btn):
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v5_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v6_hard")
     async def hard(self, inter, btn):
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v5_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v6_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
@@ -460,14 +550,11 @@ class MinesStartPanelView(discord.ui.View):
         bal = get_point_value(uid)
         class BetInputModal(discord.ui.Modal, title="💎 自分で設定"):
             bet_in = discord.ui.TextInput(
-                label=f"賭けるポイント（例：1.5京 / 10兆 / 500億）\n保有：{format_value(bal)}",
-                placeholder="例：1京",
-                required=True
+                label=f"賭けるポイント（例：1.5京 / 10兆）\n保有：{format_value(bal)}",
+                placeholder="例：1京", required=True
             )
             bomb_in = discord.ui.TextInput(
-                label="爆弾の数（1～24）",
-                placeholder="例：5",
-                required=True
+                label="爆弾の数（1～24）", placeholder="例：5", required=True
             )
             async def on_submit(s, m):
                 bet_val = parse_value(s.bet_in.value)
@@ -487,6 +574,14 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetInputModal())
 
+    @discord.ui.button(label="📋 履歴・削除", style=discord.ButtonStyle.primary, row=2, custom_id="mine_v6_history")
+    async def history(self, inter, btn):
+        uid = inter.user.id
+        view = HistoryView(uid)
+        if not view.history:
+            return await inter.response.send_message("📋 まだプレイ履歴がありません", ephemeral=True)
+        await inter.response.send_message("📋 プレイ履歴（削除したい項目をクリック）", view=view, ephemeral=True)
+
     async def _start_fixed(self, inter, bombs):
         uid = inter.user.id
         if uid in game_states:
@@ -496,8 +591,7 @@ class MinesStartPanelView(discord.ui.View):
         class BetModal(discord.ui.Modal, title=f"💎 爆弾{bombs}個"):
             bet_in = discord.ui.TextInput(
                 label=f"🔥 最大倍率：{mul}\n賭けるポイント（例：1京 / 10兆）",
-                placeholder="例：1000",
-                required=True
+                placeholder="例：1000", required=True
             )
             async def on_submit(s, m):
                 val = parse_value(s.bet_in.value)
@@ -515,24 +609,19 @@ class MinesStartPanelView(discord.ui.View):
 async def start_game(user, guild, bombs, bet):
     uid = user.id
     game_states.pop(uid, None)
-    
     channel = channel_map.get(uid)
     if not channel:
         channel = await create_game_channel(guild, user)
         channel_map[uid] = channel
-    
     game = MinesGame(user, bombs, bet)
     game.channel = channel
     game_states[uid] = game
-    
     board_view = MinesBoardView(game)
     control_view = MinesControlView(game)
-    
     try:
         board_msg = await channel.send(embed=game.playing_embed(), view=board_view)
         game.message = board_msg
         message_map[uid] = board_msg
-        
         control_msg = await channel.send("👇 操作ボタン", view=control_view)
         game.control_message = control_msg
         control_message_map[uid] = control_msg
