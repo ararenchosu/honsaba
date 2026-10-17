@@ -28,7 +28,7 @@ import features.welcome_leave as welcome_leave
 import features.voice_channel_panel as voice_panel
 import features.ranking_panel as ranking_panel
 import features.elevator_panel as elevator_panel
-import features.mines_panel as mines_panel  # ✅ マインス
+import features.mines_panel as mines_panel
 from core.common import is_owner
 
 JST = timezone(timedelta(hours=9))
@@ -127,7 +127,7 @@ async def on_ready():
         from features.backup_panel import BackupPanelView, RestoreConfirmView
         from features.command_list_panel import CommandListView
         from features.elevator_panel import ElevatorView
-        from features.mines_panel import MinesStartPanelView, BombsSelectView  # ✅ マインス
+        from features.mines_panel import MinesStartPanelView, BombsSelectView
         
         views_to_register_main = [
             (LotteryPanelView, "LotteryPanelView"),
@@ -155,8 +155,8 @@ async def on_ready():
             (voice_panel.VoiceCreatePanelView, "VoiceCreatePanelView"),
             (ranking_panel.RankingPanelView, "RankingPanelView"),
             (ElevatorView, "ElevatorView"),
-            (MinesStartPanelView, "MinesStartPanelView"),  # ✅ マインス
-            (BombsSelectView, "BombsSelectView"),          # ✅ マインス
+            (MinesStartPanelView, "MinesStartPanelView"),
+            (BombsSelectView, "BombsSelectView"),
         ]
         
         for view_cls, name in views_to_register_main:
@@ -206,7 +206,26 @@ async def on_ready():
     await voice_panel.setup(tree_main, bot_main); print("  ✅ voice_panel")
     await ranking_panel.setup(tree_main, bot_main); print("  ✅ ranking_panel")
     await elevator_panel.setup(tree_main, bot_main); print("  ✅ elevator_panel")
-    await mines_panel.setup(tree_main, bot_main); print("  ✅ mines_panel")  # ✅ マインス
+    await mines_panel.setup(tree_main, bot_main); print("  ✅ mines_panel")
+
+    # ✅ マインス コマンドをmain.pyから直接登録（二重体制）
+    @tree_main.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")
+    async def cmd_mine_panel(inter):
+        if not is_owner(inter):
+            await inter.response.send_message("❌ オーナー専用です", ephemeral=True)
+            return
+        from features.mines_panel import MinesStartPanelView
+        e = discord.Embed(title="💎 マインス 💣", color=0x1a1a1a)
+        e.description = (
+            "爆弾を避けて金塊を集め、好きなタイミングで回収！\n"
+            "────────────────────────────\n"
+            "✅ かんたん  [3個]  約15.7倍\n"
+            "⚪ ふつう    [5個]  約32.9倍\n"
+            "🔴 むずかしい [8個]  約96.3倍\n"
+            "⚙️ 自分で設定 [1～24個]"
+        )
+        await inter.response.send_message(embed=e, view=MinesStartPanelView())
+        await inter.followup.send("✅ マインスパネル設置完了", ephemeral=True)
 
     print("✅ メインBot 全コマンド登録完了")
     
@@ -221,7 +240,7 @@ async def on_ready():
     # ✅ 起動ログ送信
     if last_reason == "restart_button":
         await send_status_embed(bot_main, "✅ 再起動完了",
-            "ボタン操作により再起動されました。\n全パネル復旧済みです復旧済みです✨", 0xF39C12)
+            "ボタン操作により再起動されました。\n全パネル復旧済みです✨", 0xF39C12)
     else:
         await send_status_embed(bot_main, "🔄 起動完了",
             "機能追加・更新により起動しました。\n全パネル復旧済みです✨", 0x9B59B6)
@@ -234,7 +253,7 @@ async def on_close():
         set_reason("update")
 
 # ==================================================
-# 🔵 Bot2：サブBot — マインス関連を削除
+# 🔵 Bot2：サブBot
 # ==================================================
 TOKEN_SUB = os.getenv("DISCORD_TOKEN_SUB")
 bot_sub = None
@@ -252,7 +271,7 @@ if TOKEN_SUB:
     async def on_ready():
         print(f"\n========== サブBot 起動 ==========")
         print(f"✅ ログイン：{bot_sub.user}")
-        print("✅ サブBot 準備完了（マインスはメイン側へ移行済み）\n")
+        print("✅ サブBot 準備完了\n")
 else:
     print("⚠️ 環境変数 DISCORD_TOKEN_SUB が未設定 → サブBotは起動しません")
 
