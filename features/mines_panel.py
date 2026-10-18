@@ -128,24 +128,24 @@ def save_history_entry(entry):
         json.dump(all_data, f, ensure_ascii=False, indent=2)
 
 def clear_all_user_data(user_id):
-    """✅ ユーザーの履歴＋状態を完全消去"""
-    uid = str(user_id)
+    """✅ ユーザーのデータを完全にクリーンアップ"""
+    uid = user_id
     # 1. プレイ履歴削除
     all_data = load_history()
-    all_data = [h for h in all_data if h.get("user_id") != user_id]
+    all_data = [h for h in all_data if h.get("user_id") != uid]
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
-    # 2. ゲーム状態・設定履歴・チャンネル情報を全削除
-    if user_id in game_states:
-        del game_states[user_id]
-    if user_id in last_settings:
-        del last_settings[user_id]
-    if user_id in channel_map:
-        del channel_map[user_id]
-    if user_id in message_map:
-        del message_map[user_id]
-    if user_id in control_message_map:
-        del control_message_map[user_id]
+    # 2. 全状態を確実に削除
+    if uid in game_states:
+        del game_states[uid]
+    if uid in last_settings:
+        del last_settings[uid]
+    if uid in channel_map:
+        del channel_map[uid]
+    if uid in message_map:
+        del message_map[uid]
+    if uid in control_message_map:
+        del control_message_map[uid]
     return True
 
 FINAL_MULTIPLIER = {
@@ -169,7 +169,6 @@ message_map = {}
 control_message_map = {}
 
 main_panel_view = None
-panel_message_ref = None  # ✅ パネルメッセージ保持用
 
 class MinesGame:
     def __init__(self, user: discord.User, bombs: int, bet: int):
@@ -393,6 +392,7 @@ class MinesResultView(discord.ui.View):
 
     async def on_retry(self, inter):
         uid = self.game.user_id
+        # ✅ 残留データを二重チェック
         if uid in game_states:
             return await inter.response.send_message("❌ ゲーム進行中です！", ephemeral=True)
         setting = last_settings.get(uid)
@@ -444,23 +444,40 @@ class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v11_easy")
+    # ✅ 共通チェック関数：どのボタンでも最初に呼ぶ
+    def _can_start(self, user_id):
+        """True = ゲーム開始可能"""
+        return user_id not in game_states
+
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v12_easy")
     async def easy(self, inter, btn):
+        if not self._can_start(inter.user.id):
+            return await inter.response.send_message("❌ ゲーム進行中です！「🗑️ 全履歴・状態消去」でリセットしてください", ephemeral=True)
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v11_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v12_normal")
     async def normal(self, inter, btn):
+        if not self._can_start(inter.user.id):
+            return await inter.response.send_message("❌ ゲーム進行中です！「🗑️ 全履歴・状態消去」でリセットしてください", ephemeral=True)
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v11_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v12_hard")
     async def hard(self, inter, btn):
+        if not self._can_start(inter.user.id):
+            return await inter.response.send_message("❌ ゲーム進行中です！「🗑️ 全履歴・状態消去」でリセットしてください", ephemeral=True)
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v11_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v12_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
-        if uid in game_states:
-            return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
+        # ✅ 最新の状態を直接チェック → 残留データがあれば即座に拒否
+        if not self._can_start(uid):
+            return await inter.response.send_message(
+                "❌ まだ進行中のゲームが残っています！\n"
+                "🔽 これで解除してください\n"
+                "「🗑️ 全履歴・状態消去」→ 「✅ 全部消去する」",
+                ephemeral=True
+            )
         bal = get_point_value(uid)
         class BetInputModal(discord.ui.Modal, title="💎 自分で設定"):
             bet_in = discord.ui.TextInput(
@@ -488,21 +505,18 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetInputModal())
 
-    # ✅ パネル更新ボタン追加
-    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v11_refresh")
+    # ✅ パネル更新ボタン
+    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v12_refresh")
     async def refresh_panel(self, inter, btn):
-        global panel_message_ref
-        # 最新のViewに置き換える
         new_view = MinesStartPanelView()
         try:
             await inter.response.edit_message(view=new_view)
-            panel_message_ref = inter.message
             await inter.followup.send("✅ パネルを最新の状態に更新しました！", ephemeral=True)
         except Exception as e:
-            await inter.response.send_message(f"❌ 更新失敗：{e}\n新しくパネルを設置してください", ephemeral=True)
+            await inter.response.send_message(f"❌ 更新失敗：{e}\n新しくパネルを設置し直してください", ephemeral=True)
 
     # ✅ 全消去ボタン
-    @discord.ui.button(label="🗑️ 全履歴・状態消去", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v11_resetall")
+    @discord.ui.button(label="🗑️ 全履歴・状態消去", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v12_resetall")
     async def reset_all(self, inter, btn):
         uid = inter.user.id
         user_history = load_history(uid)
@@ -516,8 +530,8 @@ class MinesStartPanelView(discord.ui.View):
         async def confirm_yes(i):
             clear_all_user_data(uid)
             await i.response.edit_message(
-                content="✅ プレイ履歴・チャンネル情報・状態 全て消去しました！\n"
-                        "これで「自分で設定」を再び押せるようになります ✨",
+                content="✅ 完全にリセットしました！\n"
+                        "すべてのボタンが再び押せるようになります ✨",
                 view=None
             )
         
@@ -550,8 +564,6 @@ class MinesStartPanelView(discord.ui.View):
 
     async def _start_fixed(self, inter, bombs):
         uid = inter.user.id
-        if uid in game_states:
-            return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
         mul = format_mul(FINAL_MULTIPLIER[bombs])
         bal = get_point_value(uid)
         class BetModal(discord.ui.Modal, title=f"💎 爆弾{bombs}個"):
