@@ -169,6 +169,7 @@ message_map = {}
 control_message_map = {}
 
 main_panel_view = None
+panel_message_ref = None  # ✅ パネルメッセージ保持用
 
 class MinesGame:
     def __init__(self, user: discord.User, bombs: int, bet: int):
@@ -443,22 +444,21 @@ class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v10_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v11_easy")
     async def easy(self, inter, btn):
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v10_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v11_normal")
     async def normal(self, inter, btn):
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v10_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v11_hard")
     async def hard(self, inter, btn):
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v10_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v11_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
-        # ✅ 全消去後はここが必ず通るようになる
         if uid in game_states:
             return await inter.response.send_message("❌ ゲーム進行中です！終了してから再開してください", ephemeral=True)
         bal = get_point_value(uid)
@@ -488,8 +488,21 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetInputModal())
 
-    # ✅ 全消去ボタン：履歴＋状態＋チャンネル情報 まとめてリセット
-    @discord.ui.button(label="🗑️ 全履歴・状態消去", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v10_resetall")
+    # ✅ パネル更新ボタン追加
+    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v11_refresh")
+    async def refresh_panel(self, inter, btn):
+        global panel_message_ref
+        # 最新のViewに置き換える
+        new_view = MinesStartPanelView()
+        try:
+            await inter.response.edit_message(view=new_view)
+            panel_message_ref = inter.message
+            await inter.followup.send("✅ パネルを最新の状態に更新しました！", ephemeral=True)
+        except Exception as e:
+            await inter.response.send_message(f"❌ 更新失敗：{e}\n新しくパネルを設置してください", ephemeral=True)
+
+    # ✅ 全消去ボタン
+    @discord.ui.button(label="🗑️ 全履歴・状態消去", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v11_resetall")
     async def reset_all(self, inter, btn):
         uid = inter.user.id
         user_history = load_history(uid)
