@@ -12,24 +12,12 @@ DATA_FILE = "kn_points_data.json"
 HISTORY_FILE = "mines_history.json"
 MINES_CATEGORY_ID = 1558467161146663023
 
-# ✅ 単位 → 数値 変換テーブル
 UNIT_SCALE = {
-    "無量大数": 10**68,
-    "那由多": 10**64,
-    "不可思議": 10**60,
-    "阿僧祇": 10**56,
-    "恒河沙": 10**52,
-    "極": 10**48,
-    "載": 10**44,
-    "正": 10**40,
-    "澗": 10**36,
-    "溝": 10**32,
-    "穣": 10**28,
-    "垓": 10**24,
-    "京": 10**20,
-    "兆": 10**16,
-    "億": 10**12,
-    "万": 10**8,
+    "無量大数": 10**68, "那由多": 10**64, "不可思議": 10**60,
+    "阿僧祇": 10**56, "恒河沙": 10**52, "極": 10**48,
+    "載": 10**44, "正": 10**40, "澗": 10**36, "溝": 10**32,
+    "穣": 10**28, "垓": 10**24, "京": 10**20, "兆": 10**16,
+    "億": 10**12, "万": 10**8,
 }
 
 def parse_value(input_str: str):
@@ -55,9 +43,9 @@ def format_value(val):
     units = [
         ("無量大数", 10**68), ("那由多", 10**64), ("不可思議", 10**60),
         ("阿僧祇", 10**56), ("恒河沙", 10**52), ("極", 10**48),
-        ("載", 10**44), ("正", 10**40), ("澗", 10**36),
-        ("溝", 10**32), ("穣", 10**28), ("垓", 10**24),
-        ("京", 10**20), ("兆", 10**16), ("億", 10**12), ("万", 10**8),
+        ("載", 10**44), ("正", 10**40), ("澗", 10**36), ("溝", 10**32),
+        ("穣", 10**28), ("垓", 10**24), ("京", 10**20), ("兆", 10**16),
+        ("億", 10**12), ("万", 10**8),
     ]
     for name, scale in units:
         if val >= scale:
@@ -69,9 +57,9 @@ def format_mul(val):
     units = [
         ("無量大数", 10**68), ("那由多", 10**64), ("不可思議", 10**60),
         ("阿僧祇", 10**56), ("恒河沙", 10**52), ("極", 10**48),
-        ("載", 10**44), ("正", 10**40), ("澗", 10**36),
-        ("溝", 10**32), ("穣", 10**28), ("垓", 10**24),
-        ("京", 10**20), ("兆", 10**16), ("億", 10**12), ("万", 10**8),
+        ("載", 10**44), ("正", 10**40), ("澗", 10**36), ("溝", 10**32),
+        ("穣", 10**28), ("垓", 10**24), ("京", 10**20), ("兆", 10**16),
+        ("億", 10**12), ("万", 10**8),
     ]
     for name, scale in units:
         if val >= scale:
@@ -107,7 +95,6 @@ def add_point_value(user_id, amount):
     save_points_all(data)
     return data["points"][uid]
 
-# ===== ✅ 履歴管理 =====
 def load_history(user_id=None):
     if not os.path.exists(HISTORY_FILE):
         return []
@@ -127,26 +114,20 @@ def save_history_entry(entry):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
 
-def clear_all_user_data(user_id):
-    """✅ ユーザーのデータを完全にクリーンアップ"""
+# ✅ 完全クリア：どこからでも呼べるように
+def force_reset_user(user_id):
     uid = user_id
-    # 1. プレイ履歴削除
+    # 履歴削除
     all_data = load_history()
     all_data = [h for h in all_data if h.get("user_id") != uid]
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
-    # 2. 全状態を確実に削除
-    if uid in game_states:
-        del game_states[uid]
-    if uid in last_settings:
-        del last_settings[uid]
-    if uid in channel_map:
-        del channel_map[uid]
-    if uid in message_map:
-        del message_map[uid]
-    if uid in control_message_map:
-        del control_message_map[uid]
-    return True
+    # 状態全削除
+    if uid in game_states: del game_states[uid]
+    if uid in last_settings: del last_settings[uid]
+    if uid in channel_map: del channel_map[uid]
+    if uid in message_map: del message_map[uid]
+    if uid in control_message_map: del control_message_map[uid]
 
 FINAL_MULTIPLIER = {
      1: 25.0, 2: 40.0, 3: 65.0, 4: 100.0, 5: 160.0, 6: 260.0, 7: 420.0, 8: 680.0,
@@ -276,10 +257,8 @@ class MinesBoardView(discord.ui.View):
             save_history_entry({
                 "user_id": g.user_id,
                 "time": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
-                "bombs": g.bombs,
-                "bet": g.bet,
-                "result": "lose",
-                "amount": -g.bet,
+                "bombs": g.bombs, "bet": g.bet,
+                "result": "lose", "amount": -g.bet,
                 "multiplier": format_mul(g.multiplier)
             })
             embed = g.result_embed("💣 爆弾！", 
@@ -304,10 +283,8 @@ class MinesBoardView(discord.ui.View):
             save_history_entry({
                 "user_id": g.user_id,
                 "time": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
-                "bombs": g.bombs,
-                "bet": g.bet,
-                "result": "win",
-                "amount": win,
+                "bombs": g.bombs, "bet": g.bet,
+                "result": "win", "amount": win,
                 "multiplier": format_mul(g.multiplier)
             })
             embed = g.result_embed("🎉 全開け！",
@@ -362,10 +339,8 @@ class MinesControlView(discord.ui.View):
         save_history_entry({
             "user_id": g.user_id,
             "time": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
-            "bombs": g.bombs,
-            "bet": g.bet,
-            "result": "cashout",
-            "amount": win,
+            "bombs": g.bombs, "bet": g.bet,
+            "result": "cashout", "amount": win,
             "multiplier": format_mul(g.multiplier)
         })
         embed = g.result_embed("💰 回収完了！",
@@ -392,7 +367,6 @@ class MinesResultView(discord.ui.View):
 
     async def on_retry(self, inter):
         uid = self.game.user_id
-        # ✅ 残留データを二重チェック
         if uid in game_states:
             return await inter.response.send_message("❌ ゲーム進行中です！", ephemeral=True)
         setting = last_settings.get(uid)
@@ -444,40 +418,43 @@ class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    # ✅ 共通チェック関数：どのボタンでも最初に呼ぶ
-    def _can_start(self, user_id):
-        """True = ゲーム開始可能"""
-        return user_id not in game_states
-
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v12_easy")
+    # ✅ かんたん
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v13_easy")
     async def easy(self, inter, btn):
-        if not self._can_start(inter.user.id):
-            return await inter.response.send_message("❌ ゲーム進行中です！「🗑️ 全履歴・状態消去」でリセットしてください", ephemeral=True)
+        uid = inter.user.id
+        if uid in game_states:
+            return await inter.response.send_message(
+                "❌ 進行中のゲームがあります。\n"
+                "「🗑️ 強制リセット」を押してから再試行してください。", ephemeral=True)
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v12_normal")
+    # ✅ ふつう
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v13_normal")
     async def normal(self, inter, btn):
-        if not self._can_start(inter.user.id):
-            return await inter.response.send_message("❌ ゲーム進行中です！「🗑️ 全履歴・状態消去」でリセットしてください", ephemeral=True)
+        uid = inter.user.id
+        if uid in game_states:
+            return await inter.response.send_message(
+                "❌ 進行中のゲームがあります。\n"
+                "「🗑️ 強制リセット」を押してから再試行してください。", ephemeral=True)
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v12_hard")
+    # ✅ むずかしい
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v13_hard")
     async def hard(self, inter, btn):
-        if not self._can_start(inter.user.id):
-            return await inter.response.send_message("❌ ゲーム進行中です！「🗑️ 全履歴・状態消去」でリセットしてください", ephemeral=True)
+        uid = inter.user.id
+        if uid in game_states:
+            return await inter.response.send_message(
+                "❌ 進行中のゲームがあります。\n"
+                "「🗑️ 強制リセット」を押してから再試行してください。", ephemeral=True)
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v12_custom")
+    # ✅ 自分で設定 → 押された瞬間に強制リセットしてから開く
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v13_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
-        # ✅ 最新の状態を直接チェック → 残留データがあれば即座に拒否
-        if not self._can_start(uid):
-            return await inter.response.send_message(
-                "❌ まだ進行中のゲームが残っています！\n"
-                "🔽 これで解除してください\n"
-                "「🗑️ 全履歴・状態消去」→ 「✅ 全部消去する」",
-                ephemeral=True
-            )
+        # 🔑 押されたらまず強制的に全消去 → 絶対に残留させない
+        force_reset_user(uid)
+        
         bal = get_point_value(uid)
         class BetInputModal(discord.ui.Modal, title="💎 自分で設定"):
             bet_in = discord.ui.TextInput(
@@ -505,60 +482,24 @@ class MinesStartPanelView(discord.ui.View):
                 await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
         await inter.response.send_modal(BetInputModal())
 
-    # ✅ パネル更新ボタン
-    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v12_refresh")
+    # ✅ パネル更新
+    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v13_refresh")
     async def refresh_panel(self, inter, btn):
         new_view = MinesStartPanelView()
         try:
             await inter.response.edit_message(view=new_view)
-            await inter.followup.send("✅ パネルを最新の状態に更新しました！", ephemeral=True)
+            await inter.followup.send("✅ パネルを最新に更新しました！", ephemeral=True)
         except Exception as e:
             await inter.response.send_message(f"❌ 更新失敗：{e}\n新しくパネルを設置し直してください", ephemeral=True)
 
-    # ✅ 全消去ボタン
-    @discord.ui.button(label="🗑️ 全履歴・状態消去", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v12_resetall")
-    async def reset_all(self, inter, btn):
+    # ✅ 強制リセット
+    @discord.ui.button(label="🗑️ 強制リセット", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v13_reset")
+    async def force_reset_btn(self, inter, btn):
         uid = inter.user.id
-        user_history = load_history(uid)
-        history_count = len(user_history)
-        is_active = uid in game_states
-        
-        confirm_view = discord.ui.View(timeout=60)
-        yes_btn = discord.ui.Button(label="✅ 全部消去する", style=discord.ButtonStyle.danger)
-        no_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.secondary)
-        
-        async def confirm_yes(i):
-            clear_all_user_data(uid)
-            await i.response.edit_message(
-                content="✅ 完全にリセットしました！\n"
-                        "すべてのボタンが再び押せるようになります ✨",
-                view=None
-            )
-        
-        async def confirm_no(i):
-            await i.response.edit_message(content="❌ キャンセルしました", view=None)
-        
-        yes_btn.callback = confirm_yes
-        no_btn.callback = confirm_no
-        confirm_view.add_item(yes_btn)
-        confirm_view.add_item(no_btn)
-        
-        status_line = []
-        if history_count > 0:
-            status_line.append(f"・プレイ履歴：{history_count}件")
-        if is_active:
-            status_line.append("・進行中のゲーム情報あり")
-        if not status_line:
-            status_line.append("・削除する情報は見つかりませんでした")
-        
+        force_reset_user(uid)
         await inter.response.send_message(
-            f"⚠️ 以下の情報を全て消去しますか？\n"
-            + "\n".join(status_line) + "\n"
-            "・設定履歴\n"
-            "・チャンネル情報\n"
-            "・その他残留データ\n\n"
-            "この操作は取り消せません！",
-            view=confirm_view,
+            "✅ 完全にリセットしました！\n"
+            "すべてのボタンが押せるようになります ✨",
             ephemeral=True
         )
 
