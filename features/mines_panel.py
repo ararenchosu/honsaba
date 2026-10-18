@@ -88,13 +88,6 @@ def save_points_all(data):
 def get_point_value(user_id):
     return load_points_all()["points"].get(str(user_id), 0)
 
-def add_point_value(user_id, amount):
-    data = load_points_all()
-    uid = str(user_id)
-    data["points"][uid] = data["points"].get(uid, 0) + amount
-    save_points_all(data)
-    return data["points"][uid]
-
 def load_history(user_id=None):
     if not os.path.exists(HISTORY_FILE):
         return []
@@ -107,21 +100,17 @@ def load_history(user_id=None):
     except Exception:
         return []
 
-def save_history_entry(entry):
-    all_data = load_history()
-    all_data.insert(0, entry)
-    all_data = all_data[:200]
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(all_data, f, ensure_ascii=False, indent=2)
-
-# ✅ 完全クリア：どこからでも呼べるように
+# ✅ 強制リセット：処理を短く、即座に実行
 def force_reset_user(user_id):
     uid = user_id
     # 履歴削除
-    all_data = load_history()
-    all_data = [h for h in all_data if h.get("user_id") != uid]
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(all_data, f, ensure_ascii=False, indent=2)
+    try:
+        all_data = load_history()
+        all_data = [h for h in all_data if h.get("user_id") != uid]
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(all_data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
     # 状態全削除
     if uid in game_states: del game_states[uid]
     if uid in last_settings: del last_settings[uid]
@@ -195,10 +184,6 @@ class MinesGame:
         e.add_field(name="🎯 全盤面", value=self.board_text(reveal_all=True), inline=False)
         return e
 
-    def check_all_opened(self):
-        safe = 25 - self.bombs
-        return self.opened_count >= safe
-
 async def create_game_channel(guild: discord.Guild, user: discord.User):
     category = guild.get_channel(MINES_CATEGORY_ID)
     if not category:
@@ -251,16 +236,10 @@ class MinesBoardView(discord.ui.View):
 
         if g.grid[idx]:
             g.game_over = True
+            from core.database import init_db
             add_point_value(g.user_id, -g.bet)
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
             game_states.pop(g.user_id, None)
-            save_history_entry({
-                "user_id": g.user_id,
-                "time": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
-                "bombs": g.bombs, "bet": g.bet,
-                "result": "lose", "amount": -g.bet,
-                "multiplier": format_mul(g.multiplier)
-            })
             embed = g.result_embed("💣 爆弾！", 
                 f"🔹 賭け：{format_value(g.bet)}\n🔹 結果：-{format_value(g.bet)}", 0xE74C3C)
             try:
@@ -274,19 +253,12 @@ class MinesBoardView(discord.ui.View):
         g.opened_count += 1
         g.multiplier = calc_step_multiplier(g.bombs, g.opened_count)
 
-        if g.check_all_opened():
+        if g.opened_count >= (25 - g.bombs):
             g.game_over = True
             win = int(g.bet * g.multiplier)
             add_point_value(g.user_id, win)
             last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
             game_states.pop(g.user_id, None)
-            save_history_entry({
-                "user_id": g.user_id,
-                "time": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
-                "bombs": g.bombs, "bet": g.bet,
-                "result": "win", "amount": win,
-                "multiplier": format_mul(g.multiplier)
-            })
             embed = g.result_embed("🎉 全開け！",
                 f"🔹 賭け：{format_value(g.bet)}\n🔹 確定倍率：{format_mul(g.multiplier)}\n🔹 獲得：+{format_value(win)}", 0xFFD700)
             try:
@@ -336,19 +308,12 @@ class MinesControlView(discord.ui.View):
         add_point_value(g.user_id, win)
         last_settings[g.user_id] = {"bombs": g.bombs, "bet": g.bet}
         game_states.pop(g.user_id, None)
-        save_history_entry({
-            "user_id": g.user_id,
-            "time": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
-            "bombs": g.bombs, "bet": g.bet,
-            "result": "cashout", "amount": win,
-            "multiplier": format_mul(g.multiplier)
-        })
         embed = g.result_embed("💰 回収完了！",
             f"🔹 賭け：{format_value(g.bet)}\n🔹 確定倍率：{format_mul(g.multiplier)}\n🔹 獲得：+{format_value(win)}", 0x2ECC71)
         try:
             if g.message:
                 await g.message.edit(embed=embed, view=MinesResultView(g))
-            await inter.response.edit_message(content="✅ 終了しました", view=None)
+            await inter.response.send_message("✅ 終了しました", ephemeral=True)
         except Exception:
             pass
 
@@ -398,7 +363,7 @@ class MinesResultView(discord.ui.View):
             await inter.response.send_message("✅ 新しいゲームを開始しました！", ephemeral=True)
         except Exception as e:
             game_states.pop(uid, None)
-            await inter.response.send_message(f"❌ メッセージ送信失敗：{e}", ephemeral=True)
+            await inter.response.send_message(f"❌ 失敗：{e}", ephemeral=True)
 
     async def on_close(self, inter):
         uid = self.game.user_id
@@ -418,135 +383,150 @@ class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    # ✅ かんたん
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v13_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v14_easy")
     async def easy(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
             return await inter.response.send_message(
-                "❌ 進行中のゲームがあります。\n"
-                "「🗑️ 強制リセット」を押してから再試行してください。", ephemeral=True)
+                "❌ 進行中のゲームがあります。\n「🗑️ 強制リセット」を押してください。", ephemeral=True)
         await self._start_fixed(inter, 3)
 
-    # ✅ ふつう
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v13_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v14_normal")
     async def normal(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
             return await inter.response.send_message(
-                "❌ 進行中のゲームがあります。\n"
-                "「🗑️ 強制リセット」を押してから再試行してください。", ephemeral=True)
+                "❌ 進行中のゲームがあります。\n「🗑️ 強制リセット」を押してください。", ephemeral=True)
         await self._start_fixed(inter, 5)
 
-    # ✅ むずかしい
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v13_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v14_hard")
     async def hard(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
             return await inter.response.send_message(
-                "❌ 進行中のゲームがあります。\n"
-                "「🗑️ 強制リセット」を押してから再試行してください。", ephemeral=True)
+                "❌ 進行中のゲームがあります。\n「🗑️ 強制リセット」を押してください。", ephemeral=True)
         await self._start_fixed(inter, 8)
 
-    # ✅ 自分で設定 → 押された瞬間に強制リセットしてから開く
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v13_custom")
+    # ✅ 自分で設定 → 即座にModalを開く！処理を最小限に
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v14_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
-        # 🔑 押されたらまず強制的に全消去 → 絶対に残留させない
+        
+        # ✅ 先に応答！これが最も重要
+        await inter.response.defer(ephemeral=True)
+        
+        # バックグラウンドでリセット（応答を待たせない）
         force_reset_user(uid)
         
         bal = get_point_value(uid)
+        
         class BetInputModal(discord.ui.Modal, title="💎 自分で設定"):
             bet_in = discord.ui.TextInput(
-                label=f"賭けるポイント（例：1.5京 / 10兆）\n保有：{format_value(bal)}",
+                label=f"賭けるポイント 保有:{format_value(bal)}",
                 placeholder="例：1京", required=True
             )
             bomb_in = discord.ui.TextInput(
                 label="爆弾の数（1～24）", placeholder="例：5", required=True
             )
             async def on_submit(s, m):
-                bet_val = parse_value(s.bet_in.value)
-                bomb_val = parse_value(s.bomb_in.value)
-                if bet_val is None or bomb_val is None:
-                    return await m.response.send_message(
-                        "❌ 入力形式が正しくありません\n例：1京 / 5000 / 2.5兆", ephemeral=True)
-                bet_val = int(bet_val)
-                bomb_val = int(bomb_val)
-                if bet_val <= 0 or bet_val > bal:
-                    return await m.response.send_message(
-                        f"❌ ポイントが足りません\n賭け額：{format_value(bet_val)}\n保有：{format_value(bal)}", ephemeral=True)
-                if bomb_val < 1 or bomb_val > 24:
-                    return await m.response.send_message(
-                        "❌ 爆弾の数は1～24で指定してください", ephemeral=True)
-                await start_game(m.user, m.guild, bomb_val, bet_val)
-                await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
-        await inter.response.send_modal(BetInputModal())
+                try:
+                    bet_val = parse_value(s.bet_in.value)
+                    bomb_val = int(s.bomb_in.value)
+                    if bet_val is None or bomb_val is None:
+                        return await m.response.send_message("❌ 入力が正しくありません", ephemeral=True)
+                    if not (1 <= bomb_val <= 24):
+                        return await m.response.send_message("❌ 爆弾は1～24で", ephemeral=True)
+                    if bet_val <= 0 or bet_val > bal:
+                        return await m.response.send_message("❌ ポイントが足りません", ephemeral=True)
+                    
+                    game_states[uid] = "starting"
+                    channel = channel_map.get(uid)
+                    if not channel:
+                        channel = await create_game_channel(m.guild, m.user)
+                        channel_map[uid] = channel
+                    
+                    game = MinesGame(m.user, bomb_val, int(bet_val))
+                    game.channel = channel
+                    game_states[uid] = game
+                    
+                    board_view = MinesBoardView(game)
+                    control_view = MinesControlView(game)
+                    
+                    board_msg = await channel.send(embed=game.playing_embed(), view=board_view)
+                    game.message = board_msg
+                    message_map[uid] = board_msg
+                    control_msg = await channel.send("👇 操作ボタン", view=control_view)
+                    game.control_message = control_msg
+                    control_message_map[uid] = control_msg
+                    
+                    await m.response.send_message("✅ チャンネルを作成しました！", ephemeral=True)
+                except Exception as e:
+                    game_states.pop(uid, None)
+                    await m.response.send_message(f"❌ エラー：{e}", ephemeral=True)
+        
+        # ✅ モーダルを即座に開く
+        await inter.followup.send_modal(BetInputModal())
 
-    # ✅ パネル更新
-    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v13_refresh")
+    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v14_refresh")
     async def refresh_panel(self, inter, btn):
         new_view = MinesStartPanelView()
         try:
             await inter.response.edit_message(view=new_view)
-            await inter.followup.send("✅ パネルを最新に更新しました！", ephemeral=True)
+            await inter.followup.send("✅ 更新完了！", ephemeral=True)
         except Exception as e:
-            await inter.response.send_message(f"❌ 更新失敗：{e}\n新しくパネルを設置し直してください", ephemeral=True)
+            await inter.response.send_message(f"❌ 更新失敗：{e}", ephemeral=True)
 
-    # ✅ 強制リセット
-    @discord.ui.button(label="🗑️ 強制リセット", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v13_reset")
+    @discord.ui.button(label="🗑️ 強制リセット", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v14_reset")
     async def force_reset_btn(self, inter, btn):
-        uid = inter.user.id
-        force_reset_user(uid)
-        await inter.response.send_message(
-            "✅ 完全にリセットしました！\n"
-            "すべてのボタンが押せるようになります ✨",
-            ephemeral=True
-        )
+        force_reset_user(inter.user.id)
+        await inter.response.send_message("✅ リセット完了！すべて押せます ✨", ephemeral=True)
 
     async def _start_fixed(self, inter, bombs):
         uid = inter.user.id
+        await inter.response.defer(ephemeral=True)
+        
+        force_reset_user(uid)
+        
         mul = format_mul(FINAL_MULTIPLIER[bombs])
         bal = get_point_value(uid)
+        
         class BetModal(discord.ui.Modal, title=f"💎 爆弾{bombs}個"):
             bet_in = discord.ui.TextInput(
-                label=f"🔥 最大倍率：{mul}\n賭けるポイント（例：1京 / 10兆）",
+                label=f"最大倍率：{mul} 保有:{format_value(bal)}",
                 placeholder="例：1000", required=True
             )
             async def on_submit(s, m):
-                val = parse_value(s.bet_in.value)
-                if val is None:
-                    return await m.response.send_message(
-                        "❌ 入力形式が正しくありません\n例：1京 / 5000 / 2.5兆", ephemeral=True)
-                val = int(val)
-                if val <= 0 or val > bal:
-                    return await m.response.send_message(
-                        f"❌ ポイントが足りません\n賭け額：{format_value(val)}\n保有：{format_value(bal)}", ephemeral=True)
-                await start_game(m.user, m.guild, bombs, val)
-                await m.response.send_message("✅ ゲームチャンネルを作成しました！", ephemeral=True)
-        await inter.response.send_modal(BetModal())
-
-async def start_game(user, guild, bombs, bet):
-    uid = user.id
-    game_states.pop(uid, None)
-    channel = channel_map.get(uid)
-    if not channel:
-        channel = await create_game_channel(guild, user)
-        channel_map[uid] = channel
-    game = MinesGame(user, bombs, bet)
-    game.channel = channel
-    game_states[uid] = game
-    board_view = MinesBoardView(game)
-    control_view = MinesControlView(game)
-    try:
-        board_msg = await channel.send(embed=game.playing_embed(), view=board_view)
-        game.message = board_msg
-        message_map[uid] = board_msg
-        control_msg = await channel.send("👇 操作ボタン", view=control_view)
-        game.control_message = control_msg
-        control_message_map[uid] = control_msg
-    except Exception as e:
-        game_states.pop(uid, None)
-        raise Exception(f"メッセージ送信失敗：{e}")
+                try:
+                    val = parse_value(s.bet_in.value)
+                    if val is None or val <= 0 or val > bal:
+                        return await m.response.send_message("❌ 入力が正しくありません", ephemeral=True)
+                    
+                    game_states[uid] = "starting"
+                    channel = channel_map.get(uid)
+                    if not channel:
+                        channel = await create_game_channel(m.guild, m.user)
+                        channel_map[uid] = channel
+                    
+                    game = MinesGame(m.user, bombs, int(val))
+                    game.channel = channel
+                    game_states[uid] = game
+                    
+                    board_view = MinesBoardView(game)
+                    control_view = MinesControlView(game)
+                    
+                    board_msg = await channel.send(embed=game.playing_embed(), view=board_view)
+                    game.message = board_msg
+                    message_map[uid] = board_msg
+                    control_msg = await channel.send("👇 操作ボタン", view=control_view)
+                    game.control_message = control_msg
+                    control_message_map[uid] = control_msg
+                    
+                    await m.response.send_message("✅ チャンネルを作成しました！", ephemeral=True)
+                except Exception as e:
+                    game_states.pop(uid, None)
+                    await m.response.send_message(f"❌ エラー：{e}", ephemeral=True)
+        
+        await inter.followup.send_modal(BetModal())
 
 async def setup(tree, bot):
     global main_panel_view
