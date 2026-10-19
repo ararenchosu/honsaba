@@ -104,6 +104,12 @@ def save_history_entry(entry):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
 
+game_states = {}
+last_settings = {}
+channel_map = {}
+message_map = {}
+control_message_map = {}
+
 def clear_user_state(uid):
     game_states.pop(uid, None)
     last_settings.pop(uid, None)
@@ -144,15 +150,6 @@ def calc_step_multiplier(bombs: int, opened: int):
         return FINAL_MULTIPLIER[bombs]
     ratio = opened / safe
     return round(1.0 + (FINAL_MULTIPLIER[bombs] - 1.0) * ratio ** 2.2, 2)
-
-game_states = {}
-last_settings = {}
-channel_map = {}
-message_map = {}
-control_message_map = {}
-
-# ✅ グローバル変数でBotを保持
-_bot_instance = None
 
 class MinesGame:
     def __init__(self, user: discord.User, bombs: int, bet: int):
@@ -512,28 +509,9 @@ async def send_start_panel(channel):
     embed = discord.Embed(title="💎 マインス ゲーム", description="下のボタンから難易度を選んでゲームを始めてください", color=0x2ECC71)
     await channel.send(embed=embed, view=view)
 
-# ✅ 一番確実な方法：最初にBotを保持して使う
-def setup(arg):
-    global _bot_instance
-    
-    # 直接Botが渡された場合
-    if isinstance(arg, discord.Client):
-        _bot_instance = arg
-    # Treeが渡された場合 → 内部からBotを探す
-    elif hasattr(arg, '_bot') and isinstance(arg._bot, discord.Client):
-        _bot_instance = arg._bot
-    else:
-        # 他の方法で探す
-        for attr in dir(arg):
-            obj = getattr(arg, attr, None)
-            if isinstance(obj, discord.Client):
-                _bot_instance = obj
-                break
-    
-    if not _bot_instance:
-        print("[MINES] ❌ Botが見つかりません")
-        return
-    
-    # 永続View登録
-    _bot_instance.add_view(MinesStartPanelView())
-    print("[MINES] ✅ マインス開始パネル登録完了")
+# ==============================================
+# ✅ main.py の呼び出し形式に完全対応
+# ==============================================
+async def setup(tree, bot):
+    # View は main.py 側で既に登録済みのため重複登録しない
+    print("[MINES] ✅ mines_panel セットアップ完了")
