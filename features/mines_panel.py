@@ -509,8 +509,20 @@ async def send_start_panel(channel):
     embed = discord.Embed(title="💎 マインス ゲーム", description="下のボタンから難易度を選んでゲームを始めてください", color=0x2ECC71)
     await channel.send(embed=embed, view=view)
 
-# ✅ 可変引数でどちらの呼び出し方にも対応！
-def setup(*args, **kwargs):
-    bot = args[0] if args else None
+# ✅ CommandTree ではなく Bot 本体に登録する
+def setup(*args):
+    # args[0] が bot または tree の場合に対応
+    obj = args[0]
+    if hasattr(obj, 'add_view'):
+        # 直接 Bot が渡された場合
+        bot = obj
+    else:
+        # tree が渡された場合 → bot を取得
+        bot = getattr(obj, '_bot', None)
+        if not bot:
+            # 取得できなかったら何もしない（エラー回避）
+            print("[MINES] ⚠️ Bot インスタンスが取得できません")
+            return
+    
     bot.add_view(MinesStartPanelView())
     print("[MINES] ✅ マインス開始パネル登録完了")
