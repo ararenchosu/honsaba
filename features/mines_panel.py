@@ -11,6 +11,7 @@ JST = timezone(timedelta(hours=9))
 DATA_FILE = "kn_points_data.json"
 HISTORY_FILE = "mines_history.json"
 MINES_CATEGORY_ID = 1558467161146663023
+OWNER_ROLE_NAME = "鯖主"  # ✅ このロール名で判定
 
 UNIT_SCALE = {
     "無量大数": 10**68, "那由多": 10**64, "不可思議": 10**60,
@@ -160,31 +161,46 @@ class MinesGame:
         for p in random.sample(range(25), bombs):
             self.grid[p] = True
 
-    def board_text(self, reveal_all=False):
+    # ✅ 「鯖主」ロール所持者判定
+    def has_owner_role(self, user: discord.User):
+        if not self.channel or not self.channel.guild:
+            return False
+        member = self.channel.guild.get_member(user.id)
+        if not member:
+            return False
+        return any(role.name == OWNER_ROLE_NAME for role in member.roles)
+
+    # ✅ 鯖主ロール保持者だけ全表示
+    def board_text_for(self, user: discord.User, reveal_all=False):
+        show_all = reveal_all or self.has_owner_role(user)
         lines = []
         for r in range(5):
             row = []
             for c in range(5):
                 idx = r * 5 + c
-                if reveal_all or self.opened[idx]:
+                if self.opened[idx]:
+                    row.append("💣" if self.grid[idx] else "💎")
+                elif show_all:
                     row.append("💣" if self.grid[idx] else "💎")
                 else:
                     row.append("□")
             lines.append(" ".join(row))
         return "\n".join(lines)
 
-    def playing_embed(self):
+    def playing_embed_for(self, user: discord.User):
         e = discord.Embed(title="💎 マインス 💣", color=0xFFD700)
         e.add_field(name="🔹 プレイヤー", value=self.user.mention, inline=True)
         e.add_field(name="🔹 爆弾数", value=f"{self.bombs}個", inline=True)
         e.add_field(name="🔹 賭け額", value=format_value(self.bet), inline=True)
         e.add_field(name="🔥 現在倍率", value=f"**{format_mul(self.multiplier)}**", inline=True)
-        e.add_field(name="🎯 盤面", value=self.board_text(), inline=False)
+        if self.has_owner_role(user) and not self.game_over:
+            e.add_field(name="👑 鯖主モード", value="全位置を表示中", inline=False)
+        e.add_field(name="🎯 盤面", value=self.board_text_for(user), inline=False)
         return e
 
     def result_embed(self, title, desc, color):
         e = discord.Embed(title=title, description=desc, color=color)
-        e.add_field(name="🎯 全盤面", value=self.board_text(reveal_all=True), inline=False)
+        e.add_field(name="🎯 全盤面", value=self.board_text_for(self.user, reveal_all=True), inline=False)
         return e
 
 async def create_game_channel(guild: discord.Guild, user: discord.User):
@@ -286,7 +302,7 @@ class MinesBoardView(discord.ui.View):
             return
 
         try:
-            await inter.response.edit_message(embed=g.playing_embed(), view=MinesBoardView(g))
+            await inter.response.edit_message(embed=g.playing_embed_for(inter.user), view=MinesBoardView(g))
             if g.control_message:
                 await g.control_message.edit(view=MinesControlView(g))
         except Exception:
@@ -377,7 +393,7 @@ class MinesResultView(discord.ui.View):
         board_view = MinesBoardView(new_game)
         control_view = MinesControlView(new_game)
         try:
-            board_msg = await channel.send(embed=new_game.playing_embed(), view=board_view)
+            board_msg = await channel.send(embed=new_game.playing_embed_for(inter.user), view=board_view)
             new_game.message = board_msg
             message_map[uid] = board_msg
             control_msg = await channel.send("👇 操作ボタン", view=control_view)
@@ -402,12 +418,11 @@ class MinesResultView(discord.ui.View):
         except Exception:
             pass
 
-# ✅ 最も重要：カスタムIDを完全に新しくする！
 class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v20_easy")
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v23_easy")
     async def easy(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
@@ -415,7 +430,7 @@ class MinesStartPanelView(discord.ui.View):
                 "❌ 進行中のゲームがあります。\n「🗑️ 強制リセット」を押してください。", ephemeral=True)
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v20_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v23_normal")
     async def normal(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
@@ -423,7 +438,7 @@ class MinesStartPanelView(discord.ui.View):
                 "❌ 進行中のゲームがあります。\n「🗑️ 強制リセット」を押してください。", ephemeral=True)
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v20_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v23_hard")
     async def hard(self, inter, btn):
         uid = inter.user.id
         if uid in game_states:
@@ -431,13 +446,10 @@ class MinesStartPanelView(discord.ui.View):
                 "❌ 進行中のゲームがあります。\n「🗑️ 強制リセット」を押してください。", ephemeral=True)
         await self._start_fixed(inter, 8)
 
-    # ✅ 自分で設定 → 絶対にdeferしない！直接Modalを開く
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v20_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v23_custom")
     async def custom(self, inter, btn):
-        print(f"[DEBUG] 自分で設定 押されました！ user={inter.user.id}")
-        
         uid = inter.user.id
-        force_reset_user(uid)  # 残留データ削除
+        force_reset_user(uid)
         bal = get_point_value(uid)
 
         class BetInputModal(discord.ui.Modal, title="💎 自分で設定"):
@@ -449,7 +461,6 @@ class MinesStartPanelView(discord.ui.View):
                 label="爆弾の数（1～24）", placeholder="例：5", required=True
             )
             async def on_submit(s, m):
-                print(f"[DEBUG] Modal送信 受信")
                 try:
                     bet_val = parse_value(s.bet_in.value)
                     bomb_val = parse_value(s.bomb_in.value)
@@ -474,7 +485,7 @@ class MinesStartPanelView(discord.ui.View):
                     board_view = MinesBoardView(game)
                     control_view = MinesControlView(game)
                     
-                    board_msg = await channel.send(embed=game.playing_embed(), view=board_view)
+                    board_msg = await channel.send(embed=game.playing_embed_for(m.user), view=board_view)
                     game.message = board_msg
                     message_map[uid] = board_msg
                     control_msg = await channel.send("👇 操作ボタン", view=control_view)
@@ -483,24 +494,22 @@ class MinesStartPanelView(discord.ui.View):
                     
                     await m.response.send_message("✅ チャンネルを作成しました！", ephemeral=True)
                 except Exception as e:
-                    print(f"[ERROR] ゲーム作成エラー: {e}")
+                    print(f"[ERROR] {e}")
                     game_states.pop(uid, None)
                     await m.response.send_message(f"❌ エラー：{e}", ephemeral=True)
         
-        # ✅ deferしないで直接！これが最も重要
         await inter.response.send_modal(BetInputModal())
-        print(f"[DEBUG] send_modal 実行完了")
 
-    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v20_refresh")
+    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v23_refresh")
     async def refresh_panel(self, inter, btn):
         new_view = MinesStartPanelView()
         try:
             await inter.response.edit_message(view=new_view)
-            await inter.followup.send("✅ 更新完了！新しいパネルです", ephemeral=True)
+            await inter.followup.send("✅ 更新完了！", ephemeral=True)
         except Exception as e:
-            await inter.response.send_message(f"❌ 更新失敗：{e}\n新しく設置し直してください", ephemeral=True)
+            await inter.response.send_message(f"❌ 更新失敗：{e}", ephemeral=True)
 
-    @discord.ui.button(label="🗑️ 強制リセット", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v20_reset")
+    @discord.ui.button(label="🗑️ 強制リセット", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v23_reset")
     async def force_reset_btn(self, inter, btn):
         force_reset_user(inter.user.id)
         await inter.response.send_message("✅ リセット完了！", ephemeral=True)
@@ -534,7 +543,7 @@ class MinesStartPanelView(discord.ui.View):
                     board_view = MinesBoardView(game)
                     control_view = MinesControlView(game)
                     
-                    board_msg = await channel.send(embed=game.playing_embed(), view=board_view)
+                    board_msg = await channel.send(embed=game.playing_embed_for(m.user), view=board_view)
                     game.message = board_msg
                     message_map[uid] = board_msg
                     control_msg = await channel.send("👇 操作ボタン", view=control_view)
@@ -543,7 +552,7 @@ class MinesStartPanelView(discord.ui.View):
                     
                     await m.response.send_message("✅ チャンネルを作成しました！", ephemeral=True)
                 except Exception as e:
-                    print(f"[ERROR] 固定モードエラー: {e}")
+                    print(f"[ERROR] {e}")
                     game_states.pop(uid, None)
                     await m.response.send_message(f"❌ エラー：{e}", ephemeral=True)
         
@@ -553,4 +562,4 @@ async def setup(tree, bot):
     print("[MINES] setup() 実行中...")
     view = MinesStartPanelView()
     bot.add_view(view)
-    print("[MINES] ✅ View登録完了！カスタムID: mine_v20_*")
+    print("[MINES] ✅ View登録完了！カスタムID: mine_v23_*")
