@@ -3,6 +3,7 @@ from discord import app_commands
 import random
 import re
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from core.common import is_owner
 
@@ -158,11 +159,11 @@ class MinesGame:
         ).add_field(name="🎯 全盤面", value=self.reveal_all_text(), inline=False)
 
 # ==============================================
-# ✅ チャンネル作成パネル
+# ✅ チャンネル作成パネル — 完全永続化
 # ==============================================
 class MinesCreatePanelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=None)  # ✅ 絶対必要
 
     async def create_channel(self, user: discord.User):
         guild = user.guild
@@ -182,7 +183,7 @@ class MinesCreatePanelView(discord.ui.View):
             overwrites=overwrites, reason="マインズゲーム用"
         )
 
-    @discord.ui.button(label="🎮 マインズを始める", style=discord.ButtonStyle.primary, custom_id="mines_create")
+    @discord.ui.button(label="🎮 マインズを始める", style=discord.ButtonStyle.primary, custom_id="mines_create_btn")
     async def create_btn(self, inter: discord.Interaction, btn):
         await inter.response.defer(ephemeral=True)
         try:
@@ -207,11 +208,11 @@ class MinesCreatePanelView(discord.ui.View):
         )
 
 # ==============================================
-# ✅ 難易度選択パネル
+# ✅ 難易度選択パネル — 完全永続化
 # ==============================================
 class MinesSelectView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=None)  # ✅ 絶対必要
 
     async def start_bet_modal(self, inter, bombs):
         bal = get_point_value(inter.user.id)
@@ -229,19 +230,19 @@ class MinesSelectView(discord.ui.View):
                 await start_game(m, bombs, bet)
         await inter.response.send_modal(BetModal())
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.secondary, custom_id="mines_diff_easy")
     async def easy(self, inter, btn):
         await self.start_bet_modal(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple)
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, custom_id="mines_diff_normal")
     async def normal(self, inter, btn):
         await self.start_bet_modal(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.danger, custom_id="mines_diff_hard")
     async def hard(self, inter, btn):
         await self.start_bet_modal(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, custom_id="mines_diff_custom")
     async def custom(self, inter, btn):
         bal = get_point_value(inter.user.id)
         class CustomModal(discord.ui.Modal, title="💎 自分で設定"):
@@ -287,7 +288,7 @@ async def start_game(inter, bombs, bet):
     await inter.response.send_message("✅ ゲーム開始！", ephemeral=True)
 
 # ==============================================
-# ✅ 盤面ボタン
+# ✅ 盤面ボタン — 動的生成のため永続化なしでOK
 # ==============================================
 class MinesBoardView(discord.ui.View):
     def __init__(self, game):
@@ -307,7 +308,7 @@ class MinesBoardView(discord.ui.View):
                 lbl = "□"
                 style = discord.ButtonStyle.secondary
                 disabled = g.game_over
-            btn = discord.ui.Button(label=lbl, style=style, disabled=disabled, row=idx // 5)
+            btn = discord.ui.Button(label=lbl, style=style, disabled=disabled, row=idx // 5, custom_id=f"mines_cell_{g.user_id}_{idx}")
             btn.callback = lambda i, idx=idx: self.on_click(i, idx)
             self.add_item(btn)
 
@@ -382,7 +383,7 @@ class MinesControlView(discord.ui.View):
         can_end = self.game.opened_count > 0
         self.add_item(discord.ui.Button(
             label="💰 この倍率で終了", style=discord.ButtonStyle.primary,
-            disabled=not can_end, custom_id=f"mines_end_{self.game.user_id}"
+            disabled=not can_end, custom_id=f"mines_end_btn_{self.game.user_id}"
         ))
 
     async def interaction_check(self, inter):
@@ -394,7 +395,7 @@ class MinesControlView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="💰 この倍率で終了", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="💰 この倍率で終了", style=discord.ButtonStyle.primary, custom_id="mines_end_btn")
     async def end_btn(self, inter, btn):
         if self.game.opened_count == 0:
             await inter.response.send_message("❌ 1マス以上開けてから終了してください", ephemeral=True)
@@ -418,7 +419,7 @@ class MinesControlView(discord.ui.View):
         await inter.response.send_message("✅ 終了しました", ephemeral=True)
 
 # ==============================================
-# ✅ 結果画面（閉じるボタンなし）
+# ✅ 結果画面
 # ==============================================
 class MinesResultView(discord.ui.View):
     def __init__(self, game):
@@ -427,7 +428,7 @@ class MinesResultView(discord.ui.View):
         self.last_bet = game.bet
         self.user_id = game.user_id
 
-    @discord.ui.button(label="🔄 同じ設定でもう1回", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="🔄 同じ設定でもう1回", style=discord.ButtonStyle.primary, custom_id="mines_retry_same")
     async def retry_same(self, inter, btn):
         bal = get_point_value(inter.user.id)
         if self.last_bet > bal:
@@ -440,7 +441,7 @@ class MinesResultView(discord.ui.View):
             pass
         await start_game(inter, self.bombs, self.last_bet)
 
-    @discord.ui.button(label="💸 賭け金を変えてもう1回", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="💸 賭け金を変えてもう1回", style=discord.ButtonStyle.success, custom_id="mines_retry_new")
     async def retry_new(self, inter, btn):
         bal = get_point_value(inter.user.id)
         class NewBetModal(discord.ui.Modal, title=f"💎 爆弾{self.bombs}個"):
@@ -464,6 +465,7 @@ class MinesResultView(discord.ui.View):
 # ✅ セットアップ
 # ==============================================
 async def setup(tree, bot):
+    # ✅ 永続Viewを登録
     bot.add_view(MinesCreatePanelView())
     bot.add_view(MinesSelectView())
     print("[MINES] ✅ セットアップ完了")
