@@ -363,8 +363,8 @@ class MinesResultView(discord.ui.View):
                 f"❌ ポイントが足りません\n賭け額：{format_value(setting['bet'])}\n保有：{format_value(bal)}", ephemeral=True)
             return
         clear_user_state(uid)
-        start_panel = MinesSelectPanelView()
-        await start_panel.launch_game(inter, setting["bombs"], setting["bet"])
+        select_view = MinesSelectPanelView()
+        await select_view.launch_game(inter, setting["bombs"], setting["bet"])
 
     @discord.ui.button(label="💸 賭け金を変えてもう1回", style=discord.ButtonStyle.success)
     async def retry_new_btn(self, inter, btn):
@@ -386,8 +386,8 @@ class MinesResultView(discord.ui.View):
                     await m.response.send_message("❌ 賭け額が不正です", ephemeral=True)
                     return
                 clear_user_state(uid)
-                start_panel = MinesSelectPanelView()
-                await start_panel.launch_game(m, bombs, new_bet)
+                select_view = MinesSelectPanelView()
+                await select_view.launch_game(m, bombs, new_bet)
         await inter.response.send_modal(NewBetModal())
 
     @discord.ui.button(label="🗑️ チャンネルを閉じる", style=discord.ButtonStyle.danger)
@@ -490,10 +490,10 @@ class MinesSelectPanelView(discord.ui.View):
                     bombs = int(s.bombs_in.value.strip())
                     bet = parse_value(s.bet_in.value.strip(), bal)
                     if not (1 <= bombs <= 24):
-                        raise ValueError("爆弾は1～24")
+                        raise ValueError("爆弾は1～24で指定してください")
                     if bet is None or bet <= 0 or bet > bal:
                         raise ValueError("賭け額が不正です")
-                except Exception as e:
+                except ValueError as e:
                     await m.response.send_message(f"❌ {e}", ephemeral=True)
                     return
                 await self.launch_game(m, bombs, bet)
@@ -558,5 +558,4 @@ async def send_start_panel(channel):
 # ✅ main.py の呼び出し形式に対応
 # ==============================================
 async def setup(tree, bot):
-    # main.py 側で MinesCreatePanelView を登録するのでここでは何もしない
     print("[MINES] ✅ mines_panel セットアップ完了")
