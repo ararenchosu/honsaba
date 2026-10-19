@@ -363,7 +363,7 @@ class MinesResultView(discord.ui.View):
                 f"❌ ポイントが足りません\n賭け額：{format_value(setting['bet'])}\n保有：{format_value(bal)}", ephemeral=True)
             return
         clear_user_state(uid)
-        start_panel = MinesStartPanelView()
+        start_panel = MinesSelectPanelView()
         await start_panel.launch_game(inter, setting["bombs"], setting["bet"])
 
     @discord.ui.button(label="💸 賭け金を変えてもう1回", style=discord.ButtonStyle.success)
@@ -375,7 +375,6 @@ class MinesResultView(discord.ui.View):
             return
         bal = get_point_value(uid)
         bombs = setting["bombs"]
-        mul = format_mul(FINAL_MULTIPLIER[bombs])
         class NewBetModal(discord.ui.Modal, title=f"💸 賭け金変更 (爆弾{bombs}個)"):
             new_bet_in = discord.ui.TextInput(
                 label=f"新しい賭け額 保有:{format_value(bal)}｜｢オールベット｣で全額",
@@ -387,7 +386,7 @@ class MinesResultView(discord.ui.View):
                     await m.response.send_message("❌ 賭け額が不正です", ephemeral=True)
                     return
                 clear_user_state(uid)
-                start_panel = MinesStartPanelView()
+                start_panel = MinesSelectPanelView()
                 await start_panel.launch_game(m, bombs, new_bet)
         await inter.response.send_modal(NewBetModal())
 
@@ -403,17 +402,21 @@ class MinesResultView(discord.ui.View):
         except Exception:
             await inter.response.send_message("✅ 状態をリセットしました", ephemeral=True)
 
-class MinesStartPanelView(discord.ui.View):
+# ==============================================
+# ✅ ① 最初に表示：チャンネル作成パネル
+# ==============================================
+class MinesCreatePanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    async def create_game_channel(self, guild: discord.Guild, user: discord.User):
+    async def create_private_channel(self, user: discord.User):
+        guild = user.guild
         category = guild.get_channel(MINES_CATEGORY_ID)
         if not category:
             raise ValueError(f"カテゴリが見つかりません: {MINES_CATEGORY_ID}")
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=False, read_message_history=True),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True, manage_messages=True),
         }
         for m in guild.members:
@@ -426,19 +429,53 @@ class MinesStartPanelView(discord.ui.View):
         channel_map[user.id] = channel
         return channel
 
-    @discord.ui.button(label="✅ かんたんを始める [爆弾3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mines_start_easy")
+    @discord.ui.button(label="🎮 マインズを始める", style=discord.ButtonStyle.primary, custom_id="mines_create_channel")
+    async def create_btn(self, inter: discord.Interaction, btn: discord.ui.Button):
+        uid = inter.user.id
+        if uid in channel_map:
+            await inter.response.send_message("❌ すでにチャンネルが存在します", ephemeral=True)
+            return
+        try:
+            channel = await self.create_private_channel(inter.user)
+        except Exception as e:
+            await inter.response.send_message(f"❌ チャンネル作成失敗: {e}", ephemeral=True)
+            return
+        # ✅ 作成したチャンネルに難易度選択パネルを送信
+        select_view = MinesSelectPanelView()
+        embed = discord.Embed(
+            title="💎 難易度を選択",
+            description=(
+                "下のボタンから難易度を選んでゲームを開始してください！\n"
+                "✅ かんたん [3個] ｜ ⚪ ふつう [5個] ｜ 🔴 むずかしい [8個] ｜ ⚙️ 自分で設定"
+            ),
+            color=0x2ECC71
+        )
+        await channel.send(embed=embed, view=select_view)
+        await inter.response.send_message(
+            f"✅ 専用チャンネル作成完了！\n{channel.mention} で難易度を選択してください",
+            ephemeral=True
+        )
+
+# ==============================================
+# ✅ ② 専用チャンネル内に表示：難易度選択パネル
+# ==============================================
+class MinesSelectPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ かんたん [爆弾3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mines_select_easy")
     async def easy_btn(self, inter: discord.Interaction, btn: discord.ui.Button):
         await self.start_game_flow(inter, bombs=3)
 
-    @discord.ui.button(label="⚪ ふつうを始める [爆弾5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mines_start_normal")
+    @discord.ui.button(label="⚪ ふつう [爆弾5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mines_select_normal")
     async def normal_btn(self, inter: discord.Interaction, btn: discord.ui.Button):
         await self.start_game_flow(inter, bombs=5)
 
-    @discord.ui.button(label="🔴 むずかしいを始める [爆弾8個]", style=discord.ButtonStyle.red, row=0, custom_id="mines_start_hard")
+    @discord.ui.button(label="🔴 むずかしい [爆弾8個]", style=discord.ButtonStyle.red, row=0, custom_id="mines_select_hard")
     async def hard_btn(self, inter: discord.Interaction, btn: discord.ui.Button):
         await self.start_game_flow(inter, bombs=8)
 
-    @discord.ui.button(label="⚙️ 自分で設定して始める", style=discord.ButtonStyle.green, row=1, custom_id="mines_start_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mines_select_custom")
     async def custom_btn(self, inter: discord.Interaction, btn: discord.ui.Button):
         uid = inter.user.id
         bal = get_point_value(uid)
@@ -455,7 +492,7 @@ class MinesStartPanelView(discord.ui.View):
                     if not (1 <= bombs <= 24):
                         raise ValueError("爆弾は1～24")
                     if bet is None or bet <= 0 or bet > bal:
-                        raise ValueError("賭け額が不正")
+                        raise ValueError("賭け額が不正です")
                 except Exception as e:
                     await m.response.send_message(f"❌ {e}", ephemeral=True)
                     return
@@ -482,10 +519,9 @@ class MinesStartPanelView(discord.ui.View):
     async def launch_game(self, inter, bombs, bet):
         uid = inter.user.id
         clear_user_state(uid)
-        try:
-            channel = await self.create_game_channel(inter.guild, inter.user)
-        except Exception as e:
-            await inter.response.send_message(f"❌ チャンネル作成失敗: {e}", ephemeral=True)
+        channel = channel_map.get(uid)
+        if not channel:
+            await inter.response.send_message("❌ チャンネルが見つかりません。最初からやり直してください", ephemeral=True)
             return
         game = MinesGame(inter.user, bombs, bet)
         game.channel = channel
@@ -493,25 +529,34 @@ class MinesStartPanelView(discord.ui.View):
         board_view = MinesBoardView(game)
         control_view = MinesControlView(game)
         try:
+            # 選択メッセージを削除してからゲーム画面を表示
+            await inter.message.delete()
             board_msg = await channel.send(embed=game.playing_embed(), view=board_view)
             game.message = board_msg
             message_map[uid] = board_msg
             control_msg = await channel.send("👇 操作ボタン", view=control_view)
             game.control_message = control_msg
             control_message_map[uid] = control_msg
-            await inter.response.send_message(f"✅ チャンネル作成 → ゲーム開始！\n{channel.mention}", ephemeral=True)
+            await inter.response.send_message("✅ ゲーム開始！", ephemeral=True)
         except Exception as e:
             clear_user_state(uid)
             await inter.response.send_message(f"❌ 送信失敗: {e}", ephemeral=True)
 
+# ==============================================
+# ✅ 共通チャンネルにパネルを送信する関数
+# ==============================================
 async def send_start_panel(channel):
-    view = MinesStartPanelView()
-    embed = discord.Embed(title="💎 マインス ゲーム", description="下のボタンから難易度を選んでゲームを始めてください", color=0x2ECC71)
+    view = MinesCreatePanelView()
+    embed = discord.Embed(
+        title="💎 マインス ゲーム",
+        description="下のボタンを押して専用チャンネルを作成し、ゲームを始めてください✨",
+        color=0x2ECC71
+    )
     await channel.send(embed=embed, view=view)
 
 # ==============================================
-# ✅ main.py の呼び出し形式に完全対応
+# ✅ main.py の呼び出し形式に対応
 # ==============================================
 async def setup(tree, bot):
-    # View は main.py 側で既に登録済みのため重複登録しない
+    # main.py 側で MinesCreatePanelView を登録するのでここでは何もしない
     print("[MINES] ✅ mines_panel セットアップ完了")
