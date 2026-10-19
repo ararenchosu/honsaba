@@ -100,6 +100,7 @@ async def on_ready():
 
     print(f"\n========== メインBot 起動 ==========")
     print(f"✅ ログイン：{bot_main.user}")
+
     last_reason = get_and_clear_reason()
 
     def check_view_no_args(view_class, view_name: str):
@@ -131,7 +132,9 @@ async def on_ready():
         from features.backup_panel import BackupPanelView, RestoreConfirmView
         from features.command_list_panel import CommandListView
         from features.elevator_panel import ElevatorView
-        from features.mines_panel import MinesStartPanelView
+        
+        # ✅ マインス：チャンネル作成パネルに差し替え
+        from features.mines_panel import MinesCreatePanelView
 
         views_to_register_main = [
             (LotteryPanelView, "LotteryPanelView"),
@@ -159,7 +162,7 @@ async def on_ready():
             (voice_panel.VoiceCreatePanelView, "VoiceCreatePanelView"),
             (ranking_panel.RankingPanelView, "RankingPanelView"),
             (ElevatorView, "ElevatorView"),
-            (MinesStartPanelView, "MinesStartPanelView"),
+            (MinesCreatePanelView, "MinesCreatePanelView"),  # ✅ 差し替え
         ]
 
         for view_cls, name in views_to_register_main:
@@ -217,23 +220,25 @@ async def on_ready():
         print(f"  ⚠️ mines_panel エラー（スキップ）: {e}")
 
     # ==============================================
-    # ✅ マインスコマンド：絶対に登録
+    # ✅ マインスコマンド：チャンネル作成パネル版
     # ==============================================
     @tree_main.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")
     async def mine_panel_cmd(inter: discord.Interaction):
         if not is_owner(inter):
             await inter.response.send_message("❌ オーナー専用です", ephemeral=True)
             return
-        from features.mines_panel import MinesStartPanelView
+        
+        from features.mines_panel import MinesCreatePanelView
+        
         em = discord.Embed(
-            title="💎 マインス 💣",
+            title="💎 マインス ゲーム",
             description=(
-                "下のボタンから難易度を選択してゲームを開始できます！\n"
-                "✅ かんたん [3個] ｜ ⚪ ふつう [5個] ｜ 🔴 むずかしい [8個] ｜ ⚙️ 自分で設定"
+                "下のボタンを押して専用チャンネルを作成し、ゲームを始めてください✨\n"
+                "作成されたチャンネルはあなたと管理者だけが見ることができます"
             ),
-            color=0x1a1a1a
+            color=0x2ECC71
         )
-        await inter.response.send_message(embed=em, view=MinesStartPanelView())
+        await inter.response.send_message(embed=em, view=MinesCreatePanelView())
         await inter.followup.send("✅ パネル設置完了", ephemeral=True)
 
     print("  ✅ ✅ ✅ マインスコマンド → 登録完了！")
