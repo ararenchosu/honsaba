@@ -12,6 +12,8 @@ DATA_FILE = "kn_points_data.json"
 HISTORY_FILE = "mines_history.json"
 MINES_CATEGORY_ID = 1558467161146663023
 OWNER_ROLE_NAME = "鯖主"
+PANEL_LIFETIME = timedelta(hours=24)  # ✅ 24時間で使用不可
+CHANNEL_LIFETIME = timedelta(hours=24)  # ✅ 24時間でチャンネル消去
 
 UNIT_SCALE = {
     "無量大数": 10**68, "那由多": 10**64, "不可思議": 10**60,
@@ -109,6 +111,7 @@ last_settings = {}
 channel_map = {}
 message_map = {}
 control_message_map = {}
+channel_created_at = {}  # ✅ チャンネル作成時間を記録
 
 def clear_user_state(uid):
     game_states.pop(uid, None)
@@ -165,8 +168,13 @@ class MinesGame:
         self.channel = None
         self.message = None
         self.control_message = None
+        self.created_at = datetime.now(JST)  # ✅ 作成時刻記録
         for p in random.sample(range(25), bombs):
             self.grid[p] = True
+
+    def is_expired(self):
+        """✅ 24時間経過で期限切れ"""
+        return datetime.now(JST) - self.created_at > PANEL_LIFETIME
 
     def has_owner_role(self, user: discord.User):
         if not self.channel or not hasattr(self.channel, 'guild'):
@@ -197,8 +205,19 @@ class MinesGame:
         e.add_field(name="🔹 爆弾数", value=f"{self.bombs}個", inline=True)
         e.add_field(name="🔹 賭け額", value=format_value(self.bet), inline=True)
         e.add_field(name="🔥 現在倍率", value=f"**{format_mul(self.multiplier)}**", inline=True)
+        e.add_field(name="⏰ 有効期限", value=f"あと{self.remaining_time_str()}", inline=True)
         e.add_field(name="🎯 盤面", value=self.board_text(), inline=False)
         return e
+
+    def remaining_time_str(self):
+        """✅ 残り時間表示"""
+        elapsed = datetime.now(JST) - self.created_at
+        remaining = PANEL_LIFETIME - elapsed
+        if remaining.total_seconds() <= 0:
+            return "期限切れ"
+        h = int(remaining.total_seconds() // 3600)
+        m = int((remaining.total_seconds() % 3600) // 60)
+        return f"{h}時間{m}分"
 
     def result_embed(self, title, desc, color):
         e = discord.Embed(title=title, description=desc, color=color)
@@ -214,6 +233,7 @@ class MinesBoardView(discord.ui.View):
     def _build(self):
         self.clear_items()
         g = self.game
+        expired = g.is_expired()
         for idx in range(25):
             if g.opened[idx]:
                 lbl = "💣" if g.grid[idx] else "💎"
@@ -222,12 +242,19 @@ class MinesBoardView(discord.ui.View):
             else:
                 lbl = "□"
                 style = discord.ButtonStyle.secondary
-                disabled = False
+                disabled = expired  # ✅ 期限切れで押せなくなる
             btn = discord.ui.Button(label=lbl, style=style, disabled=disabled, row=idx // 5)
             btn.callback = lambda i, idx=idx: self.on_click(i, idx)
             self.add_item(btn)
 
     async def interaction_check(self, inter):
+        if self.game.is_expired():
+            await inter.response.send_message(
+                "⏰ このゲームは24時間経過したため終了しました。\n"
+                "新しくチャンネルを作成して遊んでください。",
+                ephemeral=True
+            )
+            return False
         if inter.user.id != self.game.user_id:
             await inter.response.send_message("❌ 自分のゲームだけ操作できます", ephemeral=True)
             return False
@@ -291,7 +318,8 @@ class MinesControlView(discord.ui.View):
 
     def _build(self):
         self.clear_items()
-        can_end = self.game.opened_count > 0
+        expired = self.game.is_expired()
+        can_end = self.game.opened_count > 0 and not expired
         end_btn = discord.ui.Button(
             label="💰 この倍率で終了", style=discord.ButtonStyle.primary,
             disabled=not can_end, custom_id=f"mines_end_{self.game.user_id}"
@@ -300,6 +328,12 @@ class MinesControlView(discord.ui.View):
         self.add_item(end_btn)
 
     async def interaction_check(self, inter):
+        if self.game.is_expired():
+            await inter.response.send_message(
+                "⏰ このゲームは24時間経過したため終了しました。",
+                ephemeral=True
+            )
+            return False
         if inter.user.id != self.game.user_id:
             await inter.response.send_message("❌ 自分のゲームだけ操作できます", ephemeral=True)
             return False
@@ -427,14 +461,29 @@ class MinesCreatePanelView(discord.ui.View):
             overwrites=overwrites, reason="マインズゲーム用"
         )
         channel_map[user.id] = channel
+        channel_created_at[user.id] = datetime.now(JST)  # ✅ 作成時間記録
         return channel
 
     @discord.ui.button(label="🎮 マインズを始める", style=discord.ButtonStyle.primary, custom_id="mines_create_channel")
     async def create_btn(self, inter: discord.Interaction, btn: discord.ui.Button):
         uid = inter.user.id
         if uid in channel_map:
-            await inter.response.send_message("❌ すでにチャンネルが存在します", ephemeral=True)
-            return
+            # ✅ 24時間経過していたら古いチャンネルを削除して新規作成
+            created = channel_created_at.get(uid, datetime.min.replace(tzinfo=JST))
+            if datetime.now(JST) - created > CHANNEL_LIFETIME:
+                try:
+                    old_ch = channel_map[uid]
+                    await old_ch.delete(reason="24時間経過のため自動消去")
+                except Exception:
+                    pass
+                clear_user_state(uid)
+            else:
+                await inter.response.send_message(
+                    f"❌ まだチャンネルが存在します。\n"
+                    f"⏰ 自動消去まで：{CHANNEL_LIFETIME - (datetime.now(JST) - created)}",
+                    ephemeral=True
+                )
+                return
         try:
             channel = await self.create_private_channel(inter.user)
         except Exception as e:
@@ -446,13 +495,15 @@ class MinesCreatePanelView(discord.ui.View):
             title="💎 難易度を選択",
             description=(
                 "下のボタンから難易度を選んでゲームを開始してください！\n"
-                "✅ かんたん [3個] ｜ ⚪ ふつう [5個] ｜ 🔴 むずかしい [8個] ｜ ⚙️ 自分で設定"
+                "✅ かんたん [3個] ｜ ⚪ ふつう [5個] ｜ 🔴 むずかしい [8個] ｜ ⚙️ 自分で設定\n"
+                "⏰ このチャンネルは24時間後に自動消去されます"
             ),
             color=0x2ECC71
         )
         await channel.send(embed=embed, view=select_view)
         await inter.response.send_message(
-            f"✅ 専用チャンネル作成完了！\n{channel.mention} で難易度を選択してください",
+            f"✅ 専用チャンネル作成完了！\n{channel.mention} で難易度を選択してください\n"
+            "⏰ 24時間で自動消去されます",
             ephemeral=True
         )
 
@@ -537,7 +588,7 @@ class MinesSelectPanelView(discord.ui.View):
             control_msg = await channel.send("👇 操作ボタン", view=control_view)
             game.control_message = control_msg
             control_message_map[uid] = control_msg
-            await inter.response.send_message("✅ ゲーム開始！", ephemeral=True)
+            await inter.response.send_message("✅ ゲーム開始！\n⏰ 24時間以内にプレイしてください", ephemeral=True)
         except Exception as e:
             clear_user_state(uid)
             await inter.response.send_message(f"❌ 送信失敗: {e}", ephemeral=True)
@@ -549,7 +600,8 @@ async def send_start_panel(channel):
     view = MinesCreatePanelView()
     embed = discord.Embed(
         title="💎 マインス ゲーム",
-        description="下のボタンを押して専用チャンネルを作成し、ゲームを始めてください✨",
+        description="下のボタンを押して専用チャンネルを作成し、ゲームを始めてください✨\n"
+                    "⏰ チャンネルは24時間後に自動消去されます",
         color=0x2ECC71
     )
     await channel.send(embed=embed, view=view)
