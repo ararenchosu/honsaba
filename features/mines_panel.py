@@ -509,6 +509,8 @@ async def send_start_panel(channel):
     embed = discord.Embed(title="💎 マインス ゲーム", description="下のボタンから難易度を選んでゲームを始めてください", color=0x2ECC71)
     await channel.send(embed=embed, view=view)
 
-def setup(bot):
+# ✅ 可変引数でどちらの呼び出し方にも対応！
+def setup(*args, **kwargs):
+    bot = args[0] if args else None
     bot.add_view(MinesStartPanelView())
     print("[MINES] ✅ マインス開始パネル登録完了")
