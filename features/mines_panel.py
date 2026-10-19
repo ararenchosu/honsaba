@@ -403,10 +403,7 @@ class MinesResultView(discord.ui.View):
         except Exception:
             await inter.response.send_message("✅ 状態をリセットしました", ephemeral=True)
 
-# ==================================================
-# ✅ main.py がインポートする名前に一致させる
-# ==================================================
-class MinesStartPanelView(discord.ui.View):  # ← ここが重要！
+class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
