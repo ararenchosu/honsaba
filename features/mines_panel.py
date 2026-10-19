@@ -151,6 +151,9 @@ channel_map = {}
 message_map = {}
 control_message_map = {}
 
+# ✅ グローバル変数でBotを保持
+_bot_instance = None
+
 class MinesGame:
     def __init__(self, user: discord.User, bombs: int, bet: int):
         self.user = user
@@ -509,20 +512,28 @@ async def send_start_panel(channel):
     embed = discord.Embed(title="💎 マインス ゲーム", description="下のボタンから難易度を選んでゲームを始めてください", color=0x2ECC71)
     await channel.send(embed=embed, view=view)
 
-# ✅ CommandTree ではなく Bot 本体に登録する
-def setup(*args):
-    # args[0] が bot または tree の場合に対応
-    obj = args[0]
-    if hasattr(obj, 'add_view'):
-        # 直接 Bot が渡された場合
-        bot = obj
-    else:
-        # tree が渡された場合 → bot を取得
-        bot = getattr(obj, '_bot', None)
-        if not bot:
-            # 取得できなかったら何もしない（エラー回避）
-            print("[MINES] ⚠️ Bot インスタンスが取得できません")
-            return
+# ✅ 一番確実な方法：最初にBotを保持して使う
+def setup(arg):
+    global _bot_instance
     
-    bot.add_view(MinesStartPanelView())
+    # 直接Botが渡された場合
+    if isinstance(arg, discord.Client):
+        _bot_instance = arg
+    # Treeが渡された場合 → 内部からBotを探す
+    elif hasattr(arg, '_bot') and isinstance(arg._bot, discord.Client):
+        _bot_instance = arg._bot
+    else:
+        # 他の方法で探す
+        for attr in dir(arg):
+            obj = getattr(arg, attr, None)
+            if isinstance(obj, discord.Client):
+                _bot_instance = obj
+                break
+    
+    if not _bot_instance:
+        print("[MINES] ❌ Botが見つかりません")
+        return
+    
+    # 永続View登録
+    _bot_instance.add_view(MinesStartPanelView())
     print("[MINES] ✅ マインス開始パネル登録完了")
