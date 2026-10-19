@@ -23,7 +23,6 @@ UNIT_SCALE = {
 
 def parse_value(input_str: str, balance=0):
     s = input_str.strip()
-    # ✅ オールベット対応
     if s in ["オールベット", "全額", "allbet", "AllBet"]:
         return balance
     match = re.match(r"([0-9]*\.?[0-9]+)\s*([^\d\s]*)", s)
@@ -131,33 +130,33 @@ def force_reset_user(user_id):
     clear_user_state(uid)
 
 # ==================================================
-# ✅ 全倍率を 10,000倍 に引き上げ（50万 → 50億 に合わせ）
+# ✅ 全倍率 10,000倍UP（50万→50億）
 # ==================================================
 FINAL_MULTIPLIER = {
-     1: 250_000.0,       # 25倍 → 25万倍
-     2: 400_000.0,       # 40倍 → 40万倍
-     3: 650_000.0,       # 65倍 → 65万倍
-     4: 1_000_000.0,     # 100倍 → 100万倍
-     5: 1_600_000.0,     # 160倍 → 160万倍
-     6: 2_600_000.0,     # 260倍 → 260万倍
-     7: 4_200_000.0,     # 420倍 → 420万倍
-     8: 6_800_000.0,     # 680倍 → 680万倍
-     9: 11_000_000.0,    # 1100倍 → 1100万倍
-    10: 18_000_000.0,    # 1800倍 → 1800万倍
-    11: 30_000_000.0,    # 3000倍 → 3000万倍
-    12: 50_000_000.0,    # 5000倍 → 5000万倍
-    13: 85_000_000.0,    # 8500倍 → 8500万倍
-    14: 150_000_000.0,   # 1.5万倍 → 1.5億倍
-    15: 270_000_000.0,   # 2.7万倍 → 2.7億倍
-    16: 500_000_000.0,   # 5万倍 → 5億倍
-    17: 1_000_000_000.0, # 10万倍 → 10億倍
-    18: 2_500_000_000.0, # 25万倍 → 25億倍
-    19: 6_000_000_000.0, # 60万倍 → 60億倍
-    20: 20_000_000_000.0, # 200万倍 → 200億倍
-    21: 80_000_000_000.0, # 800万倍 → 800億倍
-    22: 350_000_000_000.0, # 3500万倍 → 3500億倍
-    23: 2_000_000_000_000.0, # 2億倍 → 2兆倍
-    24: 50_000_000_000_000.0, # 50億倍 → 50兆倍
+     1: 250_000.0,
+     2: 400_000.0,
+     3: 650_000.0,
+     4: 1_000_000.0,
+     5: 1_600_000.0,
+     6: 2_600_000.0,
+     7: 4_200_000.0,
+     8: 6_800_000.0,
+     9: 11_000_000.0,
+    10: 18_000_000.0,
+    11: 30_000_000.0,
+    12: 50_000_000.0,
+    13: 85_000_000.0,
+    14: 150_000_000.0,
+    15: 270_000_000.0,
+    16: 500_000_000.0,
+    17: 1_000_000_000.0,
+    18: 2_500_000_000.0,
+    19: 6_000_000_000.0,
+    20: 20_000_000_000.0,
+    21: 80_000_000_000.0,
+    22: 350_000_000_000.0,
+    23: 2_000_000_000_000.0,
+    24: 50_000_000_000_000.0,
 }
 
 def calc_step_multiplier(bombs: int, opened: int):
@@ -482,25 +481,26 @@ class MinesStartPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v25_easy")
+    # ✅ カスタムIDを固定：mine_v24_* に戻して古いパネルと互換
+    @discord.ui.button(label="✅ かんたん [3個]", style=discord.ButtonStyle.grey, row=0, custom_id="mine_v24_easy")
     async def easy(self, inter, btn):
         uid = inter.user.id
         clear_user_state(uid)
         await self._start_fixed(inter, 3)
 
-    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v25_normal")
+    @discord.ui.button(label="⚪ ふつう [5個]", style=discord.ButtonStyle.blurple, row=0, custom_id="mine_v24_normal")
     async def normal(self, inter, btn):
         uid = inter.user.id
         clear_user_state(uid)
         await self._start_fixed(inter, 5)
 
-    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v25_hard")
+    @discord.ui.button(label="🔴 むずかしい [8個]", style=discord.ButtonStyle.red, row=0, custom_id="mine_v24_hard")
     async def hard(self, inter, btn):
         uid = inter.user.id
         clear_user_state(uid)
         await self._start_fixed(inter, 8)
 
-    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v25_custom")
+    @discord.ui.button(label="⚙️ 自分で設定", style=discord.ButtonStyle.green, row=1, custom_id="mine_v24_custom")
     async def custom(self, inter, btn):
         uid = inter.user.id
         clear_user_state(uid)
@@ -508,7 +508,7 @@ class MinesStartPanelView(discord.ui.View):
 
         class BetInputModal(discord.ui.Modal, title="💎 自分で設定"):
             bet_in = discord.ui.TextInput(
-                label=f"賭けるポイント 保有:{format_value(bal)} | ｢オールベット｣で全額",
+                label=f"賭けるポイント 保有:{format_value(bal)}｜｢オールベット｣で全額",
                 placeholder="例：1京 / オールベット", required=True
             )
             bomb_in = discord.ui.TextInput(
@@ -516,7 +516,6 @@ class MinesStartPanelView(discord.ui.View):
             )
             async def on_submit(s, m):
                 try:
-                    # ✅ オールベット対応：balanceを渡す
                     bet_val = parse_value(s.bet_in.value, bal)
                     bomb_val = parse_value(s.bomb_in.value)
                     if bet_val is None or bomb_val is None:
@@ -561,7 +560,7 @@ class MinesStartPanelView(discord.ui.View):
         
         await inter.response.send_modal(BetInputModal())
 
-    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v25_refresh")
+    @discord.ui.button(label="🔄 パネル更新", style=discord.ButtonStyle.secondary, row=2, custom_id="mine_v24_refresh")
     async def refresh_panel(self, inter, btn):
         new_view = MinesStartPanelView()
         try:
@@ -570,7 +569,7 @@ class MinesStartPanelView(discord.ui.View):
         except Exception as e:
             await inter.response.send_message(f"❌ 更新失敗：{e}", ephemeral=True)
 
-    @discord.ui.button(label="🗑️ 強制リセット", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v25_reset")
+    @discord.ui.button(label="🗑️ 強制リセット", style=discord.ButtonStyle.danger, row=2, custom_id="mine_v24_reset")
     async def force_reset_btn(self, inter, btn):
         clear_user_state(inter.user.id)
         await inter.response.send_message("✅ リセット完了！", ephemeral=True)
@@ -582,7 +581,7 @@ class MinesStartPanelView(discord.ui.View):
         
         class BetModal(discord.ui.Modal, title=f"💎 爆弾{bombs}個"):
             bet_in = discord.ui.TextInput(
-                label=f"最大倍率：{mul} 保有:{format_value(bal)} | ｢オールベット｣で全額",
+                label=f"最大倍率：{mul} 保有:{format_value(bal)}｜｢オールベット｣で全額",
                 placeholder="例：1000 / オールベット", required=True
             )
             async def on_submit(s, m):
@@ -628,4 +627,4 @@ async def setup(tree, bot):
     print("[MINES] setup() 実行中...")
     view = MinesStartPanelView()
     bot.add_view(view)
-    print("[MINES] ✅ View登録完了！カスタムID: mine_v25_*")
+    print("[MINES] ✅ View登録完了！カスタムID: mine_v24_*")
