@@ -106,6 +106,7 @@ def calc_step_multiplier(bombs: int, opened: int):
     return round(1.0 + (FINAL_MULTIPLIER[bombs] - 1.0) * ratio ** 2.2, 2)
 
 active_games = {}
+pending_users = {}  # チャンネル作成後のユーザー情報一時保管
 
 class MinesGame:
     def __init__(self, user: discord.User, bombs: int, bet: int):
@@ -159,40 +160,37 @@ class MinesGame:
         ).add_field(name="🎯 全盤面", value=self.reveal_all_text(), inline=False)
 
 # ==============================================
-# ✅ チャンネル作成パネル — 完全永続化
+# ✅ メインパネル（永続）
 # ==============================================
 class MinesCreatePanelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # ✅ 絶対必要
-
-    async def create_channel(self, user: discord.User):
-        guild = user.guild
-        category = guild.get_channel(MINES_CATEGORY_ID)
-        if not category:
-            raise ValueError(f"カテゴリが見つかりません: {MINES_CATEGORY_ID}")
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True, manage_messages=True),
-        }
-        for m in guild.members:
-            if m.guild_permissions.administrator:
-                overwrites[m] = discord.PermissionOverwrite(read_messages=True)
-        return await guild.create_text_channel(
-            name=f"マインズ-{user.name}", category=category,
-            overwrites=overwrites, reason="マインズゲーム用"
-        )
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="🎮 マインズを始める", style=discord.ButtonStyle.primary, custom_id="mines_create_btn")
     async def create_btn(self, inter: discord.Interaction, btn):
         await inter.response.defer(ephemeral=True)
         try:
-            channel = await self.create_channel(inter.user)
+            guild = inter.guild
+            category = guild.get_channel(MINES_CATEGORY_ID)
+            if not category:
+                raise ValueError(f"カテゴリが見つかりません: {MINES_CATEGORY_ID}")
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                inter.user: discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True),
+                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True, manage_messages=True),
+            }
+            for m in guild.members:
+                if m.guild_permissions.administrator:
+                    overwrites[m] = discord.PermissionOverwrite(read_messages=True)
+            channel = await guild.create_text_channel(
+                name=f"マインズ-{inter.user.name}", category=category,
+                overwrites=overwrites, reason="マインズゲーム用"
+            )
+            pending_users[inter.user.id] = {"channel_id": channel.id}
         except Exception as e:
             await inter.followup.send(f"❌ チャンネル作成失敗: {e}", ephemeral=True)
             return
 
-        view = MinesSelectView()
         embed = discord.Embed(
             title="💎 難易度を選択",
             description=(
@@ -201,18 +199,18 @@ class MinesCreatePanelView(discord.ui.View):
             ),
             color=0x2ECC71
         )
-        await channel.send(embed=embed, view=view)
+        await channel.send(embed=embed, view=MinesSelectView())
         await inter.followup.send(
             f"✅ 作成完了！→ {channel.mention}\nそちらで難易度を選んでください",
             ephemeral=True
         )
 
 # ==============================================
-# ✅ 難易度選択パネル — 完全永続化
+# ✅ 難易度選択パネル（永続！）
 # ==============================================
 class MinesSelectView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # ✅ 絶対必要
+        super().__init__(timeout=None)
 
     async def start_bet_modal(self, inter, bombs):
         bal = get_point_value(inter.user.id)
@@ -288,7 +286,7 @@ async def start_game(inter, bombs, bet):
     await inter.response.send_message("✅ ゲーム開始！", ephemeral=True)
 
 # ==============================================
-# ✅ 盤面ボタン — 動的生成のため永続化なしでOK
+# ✅ 盤面ボタン
 # ==============================================
 class MinesBoardView(discord.ui.View):
     def __init__(self, game):
@@ -462,10 +460,10 @@ class MinesResultView(discord.ui.View):
         await inter.response.send_modal(NewBetModal())
 
 # ==============================================
-# ✅ セットアップ
+# ✅ セットアップ — ここが超重要！
 # ==============================================
 async def setup(tree, bot):
-    # ✅ 永続Viewを登録
+    # ✅ 両方のViewを絶対に永続登録
     bot.add_view(MinesCreatePanelView())
-    bot.add_view(MinesSelectView())
+    bot.add_view(MinesSelectView())  # ← これがないとチャンネル内のボタンが押せない！
     print("[MINES] ✅ セットアップ完了")
