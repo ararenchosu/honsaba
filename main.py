@@ -1,9 +1,11 @@
 import discord
 from discord import app_commands
+from discord.ext import commands
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 from core.database import init_db
+
 # ===== 各機能インポート =====
 from features.lottery_panel import setup as lottery_setup
 from features.login_bonus import setup as login_bonus_setup
@@ -31,25 +33,10 @@ import features.elevator_panel as elevator_panel
 import features.mines_panel as mines_panel
 from core.common import is_owner
 
+# ===== 共通設定 =====
 JST = timezone(timedelta(hours=9))
 STATUS_LOG_CHANNEL_ID = 1559119439981449256
 REASON_FILE = ".last_stop_reason"
-
-# ==================================================
-# 🔴 Bot1：メインBot
-# ==================================================
-TOKEN_MAIN = os.getenv("DISCORD_TOKEN")
-if not TOKEN_MAIN:
-    print("❌ 環境変数 DISCORD_TOKEN が設定されていません")
-    exit(1)
-print(f"✅ メイントークン読み込み完了：{TOKEN_MAIN[:10]}...")
-
-intents_main = discord.Intents.default()
-intents_main.message_content = True
-intents_main.members = True
-bot_main = discord.Client(intents=intents_main)
-tree_main = app_commands.CommandTree(bot_main)
-bot_main._ready_done = False
 
 def get_jst_now():
     return datetime.now(JST)
@@ -86,6 +73,215 @@ def get_and_clear_reason():
         return reason
     return None
 
+def check_view_no_args(view_class, view_name: str):
+    try:
+        instance = view_class()
+        if instance.timeout is not None:
+            print(f"   ⚠️ 【{view_name}】: timeout が None になっていません")
+        return instance
+    except TypeError as e:
+        print(f"   ❌ 【{view_name}】: 引数が必要 → {e}")
+        return None
+
+# ============================================================
+# Intents
+# ============================================================
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
+intents.guilds = True
+
+# ============================================================
+# 🔴 メインBot：YWPBot（Cog形式 + 全機能統合）
+# ============================================================
+class YWPBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix="!", intents=intents)
+        self._ready_done = True
+
+    async def setup_hook(self):
+        init_db()
+        print("🔄 データベース初期化完了")
+
+        # --- Cog読み込み（もともとの機能） ---
+        cogs = [
+            "cogs.ywp_auto",
+            "cogs.ywp_commands",
+            "cogs.ywp_stages",
+            "cogs.ywp_panel",
+        ]
+        for cog in cogs:
+            try:
+                await self.load_extension(cog)
+                print(f"✅ Cogロード: {cog}")
+            except Exception as e:
+                print(f"❌ Cogロード失敗 {cog}: {e}")
+
+        # --- View永続化登録 ---
+        print("\n🔍 View 永続化登録中...")
+        all_ok = True
+        try:
+            from features.lottery_panel import LotteryPanelView, PointCheckPanelView
+            from features.login_bonus import LoginBonusPanelView
+            from features.slots_panel import SlotPanelView
+            from features.blackjack_panel import BlackjackPanelView
+            from features.highlow_panel import HighLowPanelView
+            from features.point_admin_panel import PointAdminView
+            from features.moderation_panel import ModerationPanelView
+            from features.security_panel import (
+                SecurityMainView, ForbiddenWordView,
+                LockChannelView, UnlockChannelView,
+                EmergencyLockView, EmergencyUnlockView
+            )
+            from features.invite_link import InvitePanelView
+            from features.backup_panel import BackupPanelView, RestoreConfirmView
+            from features.command_list_panel import CommandListView
+            from features.elevator_panel import ElevatorView
+            from features.mines_panel import MinesCreatePanelView, MinesSelectView
+
+            views_to_register = [
+                (LotteryPanelView, "LotteryPanelView"),
+                (PointCheckPanelView, "PointCheckPanelView"),
+                (LoginBonusPanelView, "LoginBonusPanelView"),
+                (SlotPanelView, "SlotPanelView"),
+                (BlackjackPanelView, "BlackjackPanelView"),
+                (HighLowPanelView, "HighLowPanelView"),
+                (PointAdminView, "PointAdminView"),
+                (ModerationPanelView, "ModerationPanelView"),
+                (SecurityMainView, "SecurityMainView"),
+                (ForbiddenWordView, "ForbiddenWordView"),
+                (LockChannelView, "LockChannelView"),
+                (UnlockChannelView, "UnlockChannelView"),
+                (EmergencyLockView, "EmergencyLockView"),
+                (EmergencyUnlockView, "EmergencyUnlockView"),
+                (InvitePanelView, "InvitePanelView"),
+                (BackupPanelView, "BackupPanelView"),
+                (RestoreConfirmView, "RestoreConfirmView"),
+                (othello_panel.OthelloPanelView, "OthelloPanelView"),
+                (call_panel.CallPanelView, "CallPanelView"),
+                (auth_panel.AuthPanelView, "AuthPanelView"),
+                (role_panel.RoleSelectPanelView, "RoleSelectPanelView"),
+                (revoke_panel.RoleRevokePanelView, "RoleRevokePanelView"),
+                (voice_panel.VoiceCreatePanelView, "VoiceCreatePanelView"),
+                (ranking_panel.RankingPanelView, "RankingPanelView"),
+                (ElevatorView, "ElevatorView"),
+                (MinesCreatePanelView, "MinesCreatePanelView"),
+                (MinesSelectView, "MinesSelectView"),
+            ]
+            for view_cls, name in views_to_register:
+                instance = check_view_no_args(view_cls, name)
+                if instance:
+                    self.add_view(instance)
+                    print(f"   ✅ {name}")
+                else:
+                    all_ok = False
+            clv = CommandListView()
+            clv.tree = self.tree
+            self.add_view(clv)
+            print("   ✅ CommandListView")
+            if all_ok:
+                print("✅ 全View 永続登録完了 ✨")
+            else:
+                print("⚠️ 上記の❌ を修正して再起動してください")
+        except Exception as e:
+            print(f"❌ View登録エラー: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # --- 各機能セットアップ ---
+        print("\n🔄 コマンド登録中...")
+        tree = self.tree
+        await lottery_setup(tree, self); print("  ✅ lottery_panel")
+        await login_bonus_setup(tree, self); print("  ✅ login_bonus")
+        await slots_setup(tree, self); print("  ✅ slots_panel")
+        await blackjack_setup(tree, self); print("  ✅ blackjack_panel")
+        await highlow_setup(tree, self); print("  ✅ highlow_panel")
+        await point_admin_setup(tree, self); print("  ✅ point_admin_panel")
+        await embed_sender.setup(tree); print("  ✅ embed_sender")
+        await clear_messages.setup(tree); print("  ✅ clear_messages")
+        await moderation_panel.setup(tree, self); print("  ✅ moderation_panel")
+        await security_panel.setup(tree, self); print("  ✅ security_panel")
+        await invite_link.setup(tree, self); print("  ✅ invite_link")
+        await backup_panel.setup(tree, self); print("  ✅ backup_panel")
+        await command_list_panel.setup(tree); print("  ✅ command_list_panel")
+        await othello.setup(tree); print("  ✅ othello")
+        await othello_panel.setup(tree, self); print("  ✅ othello_panel")
+        await auth_panel.setup(tree, self); print("  ✅ auth_panel")
+        await role_panel.setup(tree, self); print("  ✅ role_panel")
+        await revoke_panel.setup(tree, self); print("  ✅ revoke_panel")
+        await call_panel.setup(tree, self); print("  ✅ call_panel")
+        await welcome_leave.setup(self); print("  ✅ welcome_leave")
+        await voice_panel.setup(tree, self); print("  ✅ voice_panel")
+        await ranking_panel.setup(tree, self); print("  ✅ ranking_panel")
+        await elevator_panel.setup(tree, self); print("  ✅ elevator_panel")
+        try:
+            await mines_panel.setup(tree, self)
+            print("  ✅ mines_panel")
+        except Exception as e:
+            print(f"  ⚠️ mines_panel エラー（スキップ）: {e}")
+
+        # --- マインスパネル設置コマンド ---
+        @tree.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")
+        async def mine_panel_cmd(inter: discord.Interaction):
+            if not is_owner(inter):
+                await inter.response.send_message("❌ オーナー専用です", ephemeral=True)
+                return
+            from features.mines_panel import MinesCreatePanelView
+            em = discord.Embed(
+                title="💎 マインス ゲーム",
+                description=(
+                    "下のボタンを押して専用チャンネルを作成し、ゲームを始めてください✨\n"
+                    "作成されたチャンネルはあなたと管理者だけが見ることができます"
+                ),
+                color=0x2ECC71
+            )
+            await inter.response.send_message(embed=em, view=MinesCreatePanelView())
+            await inter.followup.send("✅ パネル設置完了", ephemeral=True)
+        print("  ✅ マインスコマンド登録完了")
+
+        # --- スラッシュコマンド同期 ---
+        print("\n🔁 スラッシュコマンド同期中...")
+        synced = await tree.sync()
+        print(f"✅ 同期完了！合計 {len(synced)} 件")
+
+        # --- 自動更新タスク ---
+        print("\n🔄 自動更新タスク起動中...")
+        asyncio.create_task(ranking_panel.auto_update_task(self))
+        print("✅ ランキング自動更新タスク起動完了")
+
+bot_main = YWPBot()
+
+# ==================================================
+# 🔵 サブBot（任意）
+# ==================================================
+TOKEN_SUB = os.getenv("DISCORD_TOKEN_SUB")
+bot_sub = None
+if TOKEN_SUB:
+    print(f"✅ サブトークン読み込み完了：{TOKEN_SUB[:10]}...")
+    intents_sub = discord.Intents.default()
+    intents_sub.message_content = True
+    intents_sub.members = True
+
+    class SubBot(discord.Client):
+        def __init__(self):
+            super().__init__(intents=intents_sub)
+            self.tree = app_commands.CommandTree(self)
+            self._ready_done = False
+        async def on_ready(self):
+            if self._ready_done:
+                return
+            self._ready_done = True
+            print(f"\n========== サブBot 起動 ==========")
+            print(f"✅ ログイン：{self.user}")
+            print("✅ サブBot 準備完了\n")
+
+    bot_sub = SubBot()
+else:
+    print("⚠️ 環境変数 DISCORD_TOKEN_SUB が未設定 → サブBotは起動しません")
+
+# ==================================================
+# 起動イベント
+# ==================================================
 @bot_main.event
 async def on_message(message):
     if message.guild and not message.author.bot:
@@ -94,172 +290,16 @@ async def on_message(message):
 
 @bot_main.event
 async def on_ready():
-    if bot_main._ready_done:
-        return
-    bot_main._ready_done = True
-
     print(f"\n========== メインBot 起動 ==========")
-    print(f"✅ ログイン：{bot_main.user}")
-
+    print(f"✅ Logged in as {bot_main.user} ({bot_main.user.id})")
+    print(f"📡 接続サーバー: {len(bot_main.guilds)}件")
     last_reason = get_and_clear_reason()
-
-    def check_view_no_args(view_class, view_name: str):
-        try:
-            instance = view_class()
-            if instance.timeout is not None:
-                print(f"   ⚠️ 【{view_name}】: timeout が None になっていません")
-            return instance
-        except TypeError as e:
-            print(f"   ❌ 【{view_name}】: 引数が必要 → {e}")
-            return None
-
-    print("\n🔍 メインBot View 永続化チェック & 登録中...")
-    all_ok_main = True
-    try:
-        from features.lottery_panel import LotteryPanelView, PointCheckPanelView
-        from features.login_bonus import LoginBonusPanelView
-        from features.slots_panel import SlotPanelView
-        from features.blackjack_panel import BlackjackPanelView
-        from features.highlow_panel import HighLowPanelView
-        from features.point_admin_panel import PointAdminView
-        from features.moderation_panel import ModerationPanelView
-        from features.security_panel import (
-            SecurityMainView, ForbiddenWordView,
-            LockChannelView, UnlockChannelView,
-            EmergencyLockView, EmergencyUnlockView
-        )
-        from features.invite_link import InvitePanelView
-        from features.backup_panel import BackupPanelView, RestoreConfirmView
-        from features.command_list_panel import CommandListView
-        from features.elevator_panel import ElevatorView
-        
-        # ✅ マインス：チャンネル作成パネルに差し替え
-        from features.mines_panel import MinesCreatePanelView
-
-        views_to_register_main = [
-            (LotteryPanelView, "LotteryPanelView"),
-            (PointCheckPanelView, "PointCheckPanelView"),
-            (LoginBonusPanelView, "LoginBonusPanelView"),
-            (SlotPanelView, "SlotPanelView"),
-            (BlackjackPanelView, "BlackjackPanelView"),
-            (HighLowPanelView, "HighLowPanelView"),
-            (PointAdminView, "PointAdminView"),
-            (ModerationPanelView, "ModerationPanelView"),
-            (SecurityMainView, "SecurityMainView"),
-            (ForbiddenWordView, "ForbiddenWordView"),
-            (LockChannelView, "LockChannelView"),
-            (UnlockChannelView, "UnlockChannelView"),
-            (EmergencyLockView, "EmergencyLockView"),
-            (EmergencyUnlockView, "EmergencyUnlockView"),
-            (InvitePanelView, "InvitePanelView"),
-            (BackupPanelView, "BackupPanelView"),
-            (RestoreConfirmView, "RestoreConfirmView"),
-            (othello_panel.OthelloPanelView, "OthelloPanelView"),
-            (call_panel.CallPanelView, "CallPanelView"),
-            (auth_panel.AuthPanelView, "AuthPanelView"),
-            (role_panel.RoleSelectPanelView, "RoleSelectPanelView"),
-            (revoke_panel.RoleRevokePanelView, "RoleRevokePanelView"),
-            (voice_panel.VoiceCreatePanelView, "VoiceCreatePanelView"),
-            (ranking_panel.RankingPanelView, "RankingPanelView"),
-            (ElevatorView, "ElevatorView"),
-            (MinesCreatePanelView, "MinesCreatePanelView"),  # ✅ 差し替え
-        ]
-
-        for view_cls, name in views_to_register_main:
-            instance = check_view_no_args(view_cls, name)
-            if instance:
-                bot_main.add_view(instance)
-                print(f"   ✅ {name}")
-            else:
-                all_ok_main = False
-
-        clv = CommandListView()
-        clv.tree = tree_main
-        bot_main.add_view(clv)
-        print("   ✅ CommandListView")
-
-        if all_ok_main:
-            print("✅ メインBot 全View 永続登録完了 ✨")
-        else:
-            print("⚠️ メインBot：上記の❌ を修正して再起動してください")
-
-    except Exception as e:
-        print(f"❌ メインBot View登録エラー: {e}")
-        import traceback
-        traceback.print_exc()
-
-    print("\n🔄 メインBot コマンド登録中...")
-    await lottery_setup(tree_main, bot_main); print("  ✅ lottery_panel")
-    await login_bonus_setup(tree_main, bot_main); print("  ✅ login_bonus")
-    await slots_setup(tree_main, bot_main); print("  ✅ slots_panel")
-    await blackjack_setup(tree_main, bot_main); print("  ✅ blackjack_panel")
-    await highlow_setup(tree_main, bot_main); print("  ✅ highlow_panel")
-    await point_admin_setup(tree_main, bot_main); print("  ✅ point_admin_panel")
-    await embed_sender.setup(tree_main); print("  ✅ embed_sender")
-    await clear_messages.setup(tree_main); print("  ✅ clear_messages")
-    await moderation_panel.setup(tree_main, bot_main); print("  ✅ moderation_panel")
-    await security_panel.setup(tree_main, bot_main); print("  ✅ security_panel")
-    await invite_link.setup(tree_main, bot_main); print("  ✅ invite_link")
-    await backup_panel.setup(tree_main, bot_main); print("  ✅ backup_panel")
-    await command_list_panel.setup(tree_main); print("  ✅ command_list_panel")
-    await othello.setup(tree_main); print("  ✅ othello")
-    await othello_panel.setup(tree_main, bot_main); print("  ✅ othello_panel")
-    await auth_panel.setup(tree_main, bot_main); print("  ✅ auth_panel")
-    await role_panel.setup(tree_main, bot_main); print("  ✅ role_panel")
-    await revoke_panel.setup(tree_main, bot_main); print("  ✅ revoke_panel")
-    await call_panel.setup(tree_main, bot_main); print("  ✅ call_panel")
-    await welcome_leave.setup(bot_main); print("  ✅ welcome_leave")
-    await voice_panel.setup(tree_main, bot_main); print("  ✅ voice_panel")
-    await ranking_panel.setup(tree_main, bot_main); print("  ✅ ranking_panel")
-    await elevator_panel.setup(tree_main, bot_main); print("  ✅ elevator_panel")
-
-    try:
-        await mines_panel.setup(tree_main, bot_main)
-        print("  ✅ mines_panel")
-    except Exception as e:
-        print(f"  ⚠️ mines_panel エラー（スキップ）: {e}")
-
-    # ==============================================
-    # ✅ マインスコマンド：チャンネル作成パネル版
-    # ==============================================
-    @tree_main.command(name="マインズパネル設置", description="💎 マインスパネルを設置（オーナー専用）")
-    async def mine_panel_cmd(inter: discord.Interaction):
-        if not is_owner(inter):
-            await inter.response.send_message("❌ オーナー専用です", ephemeral=True)
-            return
-        
-        from features.mines_panel import MinesCreatePanelView
-        
-        em = discord.Embed(
-            title="💎 マインス ゲーム",
-            description=(
-                "下のボタンを押して専用チャンネルを作成し、ゲームを始めてください✨\n"
-                "作成されたチャンネルはあなたと管理者だけが見ることができます"
-            ),
-            color=0x2ECC71
-        )
-        await inter.response.send_message(embed=em, view=MinesCreatePanelView())
-        await inter.followup.send("✅ パネル設置完了", ephemeral=True)
-
-    print("  ✅ ✅ ✅ マインスコマンド → 登録完了！")
-    print("✅ メインBot 全コマンド登録完了")
-
-    print("\n🔄 グローバル同期中...")
-    synced = await tree_main.sync()
-    print(f"✅ 同期完了！合計 {len(synced)} 件")
-
-    print("\n🔄 自動更新タスク起動中...")
-    asyncio.create_task(ranking_panel.auto_update_task(bot_main))
-    print("✅ ランキング自動更新タスク起動完了")
-
     if last_reason == "restart_button":
         await send_status_embed(bot_main, "✅ 再起動完了",
             "ボタン操作により再起動されました。\n全パネル復旧済みです✨", 0xF39C12)
     else:
         await send_status_embed(bot_main, "🔄 起動完了",
             "機能追加・更新により起動しました。\n全パネル復旧済みです✨", 0x9B59B6)
-
-    print("✅ 起動通知送信完了")
     print("✅ メインBot 準備完了\n")
 
 @bot_main.event
@@ -268,42 +308,16 @@ async def on_close():
         set_reason("update")
 
 # ==================================================
-# 🔵 Bot2：サブBot
-# ==================================================
-TOKEN_SUB = os.getenv("DISCORD_TOKEN_SUB")
-bot_sub = None
-tree_sub = None
-
-if TOKEN_SUB:
-    print(f"✅ サブトークン読み込み完了：{TOKEN_SUB[:10]}...")
-    intents_sub = discord.Intents.default()
-    intents_sub.message_content = True
-    intents_sub.members = True
-    bot_sub = discord.Client(intents=intents_sub)
-    tree_sub = app_commands.CommandTree(bot_sub)
-    bot_sub._ready_done = False
-
-    @bot_sub.event
-    async def on_ready():
-        if bot_sub._ready_done:
-            return
-        bot_sub._ready_done = True
-        print(f"\n========== サブBot 起動 ==========")
-        print(f"✅ ログイン：{bot_sub.user}")
-        print("✅ サブBot 準備完了\n")
-else:
-    print("⚠️ 環境変数 DISCORD_TOKEN_SUB が未設定 → サブBotは起動しません")
-
-# ==================================================
 # 🚀 並行起動
 # ==================================================
 async def main():
-    init_db()
-    print("🔄 データベース初期化完了")
-    tasks = [bot_main.start(TOKEN_MAIN)]
+    tasks = [bot_main.start(os.getenv("DISCORD_TOKEN"))]
     if TOKEN_SUB and bot_sub:
         tasks.append(bot_sub.start(TOKEN_SUB))
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("🛑 停止")
