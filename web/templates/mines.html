@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>💎 マインス</title>
+    <style>
+        * { box-sizing: border-box; font-family: sans-serif; }
+        body { background: #1a1a2e; color: #fff; padding: 20px; text-align: center; }
+        .container { max-width: 500px; margin: 0 auto; }
+        h1 { color: #ffd700; }
+        .status { background: #16213e; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 20px 0; }
+        .cell { aspect-ratio: 1; font-size: 24px; border: none; border-radius: 8px; cursor: pointer; background: #0f3460; color: #fff; transition: 0.2s; }
+        .cell:hover { background: #e94560; transform: scale(1.05); }
+        .cell.opened { cursor: default; }
+        .cell.bomb { background: #e94560; }
+        .cell.gem { background: #2ecc71; }
+        .controls { margin: 20px 0; }
+        button { padding: 12px 24px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; margin: 5px; }
+        .btn-start { background: #2ecc71; color: #fff; }
+        .btn-cash { background: #ffd700; color: #000; }
+        .input-group { margin: 10px 0; }
+        input { padding: 10px; font-size: 16px; border-radius: 5px; border: none; width: 200px; }
+        select { padding: 10px; font-size: 16px; border-radius: 5px; border: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💎 マインス 💣</h1>
+
+        <div class="status">
+            <div>ユーザーID: <input type="text" id="user_id" placeholder="DiscordユーザーID" value="123456789"></div>
+            <div id="balance-display">保有ポイント: ---</div>
+            <div id="multiplier-display">倍率: 1.0x</div>
+        </div>
+
+        <div class="controls">
+            <select id="bombs">
+                <option value="3">✅ かんたん 3個</option>
+                <option value="5" selected>⚪ ふつう 5個</option>
+                <option value="8">🔴 むずかしい 8個</option>
+                <option value="12">⚙️ むずかしい 12個</option>
+            </select>
+            <input type="number" id="bet" placeholder="賭け額" value="1000">
+            <button class="btn-start" onclick="startGame()">ゲーム開始</button>
+        </div>
+
+        <div class="grid" id="grid">
+            <!-- 盤面はJSで生成 -->
+        </div>
+
+        <button class="btn-cash" id="cashout-btn" onclick="cashout()" style="display:none;">💰 この倍率で回収</button>
+        <div id="message"></div>
+    </div>
+
+    <script>
+        let gameActive = false;
+
+        function renderGrid(opened=[], gridState=[]) {
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            for (let i = 0; i < 25; i++) {
+                const cell = document.createElement('button');
+                cell.className = 'cell';
+                if (opened[i]) {
+                    cell.classList.add('opened');
+                    cell.textContent = gridState[i] === 'bomb' ? '💣' : '💎';
+                    if (gridState[i] === 'bomb') cell.classList.add('bomb');
+                    else cell.classList.add('gem');
+                } else if (gameActive) {
+                    cell.textContent = '□';
+                    cell.onclick = () => openCell(i);
+                } else {
+                    cell.textContent = '□';
+                }
+                grid.appendChild(cell);
+            }
+        }
+
+        async function startGame() {
+            const user_id = document.getElementById('user_id').value;
+            const bombs = parseInt(document.getElementById('bombs').value);
+            const bet = parseInt(document.getElementById('bet').value);
+
+            const res = await fetch('/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user_id, bombs, bet})
+            });
+            const data = await res.json();
+            if (!res.ok) return alert(data.error);
+
+            gameActive = true;
+            document.getElementById('balance-display').textContent = `保有ポイント: ${data.balance?.toLocaleString()}`;
+            document.getElementById('multiplier-display').textContent = '倍率: 1.0x';
+            document.getElementById('cashout-btn').style.display = 'inline-block';
+            document.getElementById('message').textContent = '';
+            renderGrid();
+        }
+
+        async function openCell(idx) {
+            const user_id = document.getElementById('user_id').value;
+            const res = await fetch('/open', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user_id, index: idx})
+            });
+            const data = await res.json();
+
+            if (data.result === 'lose') {
+                gameActive = false;
+                document.getElementById('balance-display').textContent = `保有ポイント: ${data.balance?.toLocaleString()}`;
+                document.getElementById('cashout-btn').style.display = 'none';
+                document.getElementById('message').innerHTML = '<h3 style="color:red;">💣 爆弾！</h3>';
+                renderGrid(Array(25).fill(true), activeGameGrid);
+            } else if (data.result === 'win') {
+                gameActive = false;
+                document.getElementById('balance-display').textContent = `保有ポイント: ${data.balance?.toLocaleString()}`;
+                document.getElementById('multiplier-display').textContent = `倍率: ${data.multiplier}x`;
+                document.getElementById('cashout-btn').style.display = 'none';
+                document.getElementById('message').innerHTML = `<h3 style="color:gold;">🎉 全開け！ +${data.amount?.toLocaleString()}</h3>`;
+            } else {
+                document.getElementById('multiplier-display').textContent = `倍率: ${data.multiplier}x`;
+                renderGrid([...document.querySelectorAll('.cell')].map((_,i) => i === idx ? true : opened[i]), []);
+            }
+        }
+
+        async function cashout() {
+            const user_id = document.getElementById('user_id').value;
+            const res = await fetch('/cashout', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user_id})
+            });
+            const data = await res.json();
+            if (!res.ok) return alert(data.error);
+
+            gameActive = false;
+            document.getElementById('balance-display').textContent = `保有ポイント: ${data.balance?.toLocaleString()}`;
+            document.getElementById('cashout-btn').style.display = 'none';
+            document.getElementById('message').innerHTML = `<h3 style="color:green;">💰 回収！ +${data.amount?.toLocaleString()}</h3>`;
+        }
+
+        renderGrid();
+    </script>
+</body>
+</html>
