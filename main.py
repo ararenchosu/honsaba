@@ -3,9 +3,9 @@ from discord import app_commands
 from discord.ext import commands
 import asyncio
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from core.database import init_db
-
 # ===== 各機能インポート =====
 from features.lottery_panel import setup as lottery_setup
 from features.login_bonus import setup as login_bonus_setup
@@ -32,6 +32,13 @@ import features.ranking_panel as ranking_panel
 import features.elevator_panel as elevator_panel
 import features.mines_panel as mines_panel
 from core.common import is_owner
+# ===== ウェブサーバーインポート =====
+try:
+    from web.app import app as flask_app
+    WEB_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️ ウェブサーバー読み込みエラー: {e}")
+    WEB_AVAILABLE = False
 
 # ===== 共通設定 =====
 JST = timezone(timedelta(hours=9))
@@ -83,6 +90,15 @@ def check_view_no_args(view_class, view_name: str):
         print(f"   ❌ 【{view_name}】: 引数が必要 → {e}")
         return None
 
+# ===== ウェブサーバー起動 =====
+def run_web_server():
+    if not WEB_AVAILABLE:
+        return
+    try:
+        flask_app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+    except Exception as e:
+        print(f"❌ ウェブサーバー起動エラー: {e}")
+
 # ============================================================
 # Intents
 # ============================================================
@@ -97,13 +113,19 @@ intents.guilds = True
 class YWPBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
-        self._ready_done = True
+        self._ready_done = False
 
     async def setup_hook(self):
         init_db()
         print("🔄 データベース初期化完了")
 
-        # --- Cog読み込み（もともとの機能） ---
+        # --- ウェブサーバー起動（バックグラウンド） ---
+        if WEB_AVAILABLE:
+            web_thread = threading.Thread(target=run_web_server, daemon=True)
+            web_thread.start()
+            print("✅ ウェブサーバー起動完了 :5000")
+
+        # --- Cog読み込み ---
         cogs = [
             "cogs.ywp_auto",
             "cogs.ywp_commands",
@@ -167,6 +189,7 @@ class YWPBot(commands.Bot):
                 (ElevatorView, "ElevatorView"),
                 (MinesWebStartView, "MinesWebStartView"),
             ]
+
             for view_cls, name in views_to_register:
                 instance = check_view_no_args(view_cls, name)
                 if instance:
@@ -174,14 +197,17 @@ class YWPBot(commands.Bot):
                     print(f"   ✅ {name}")
                 else:
                     all_ok = False
+
             clv = CommandListView()
             clv.tree = self.tree
             self.add_view(clv)
             print("   ✅ CommandListView")
+
             if all_ok:
                 print("✅ 全View 永続登録完了 ✨")
             else:
                 print("⚠️ 上記の❌ を修正して再起動してください")
+
         except Exception as e:
             print(f"❌ View登録エラー: {e}")
             import traceback
@@ -200,7 +226,7 @@ class YWPBot(commands.Bot):
         await clear_messages.setup(tree); print("  ✅ clear_messages")
         await moderation_panel.setup(tree, self); print("  ✅ moderation_panel")
         await security_panel.setup(tree, self); print("  ✅ security_panel")
-        await invite_link.setup(tree, self); print("  ✅ invite_link")
+        await invite_link.setup(tree); print("  ✅ invite_link")
         await backup_panel.setup(tree, self); print("  ✅ backup_panel")
         await command_list_panel.setup(tree); print("  ✅ command_list_panel")
         await othello.setup(tree); print("  ✅ othello")
@@ -213,6 +239,7 @@ class YWPBot(commands.Bot):
         await voice_panel.setup(tree, self); print("  ✅ voice_panel")
         await ranking_panel.setup(tree, self); print("  ✅ ranking_panel")
         await elevator_panel.setup(tree, self); print("  ✅ elevator_panel")
+
         try:
             await mines_panel.setup(tree, self)
             print("  ✅ mines_panel")
@@ -225,16 +252,16 @@ class YWPBot(commands.Bot):
             if not is_owner(inter):
                 await inter.response.send_message("❌ オーナー専用です", ephemeral=True)
                 return
-            from features.mines_panel import MinesCreatePanelView
+            from features.mines_panel import MinesWebStartView
             em = discord.Embed(
                 title="💎 マインス ゲーム",
                 description=(
-                    "下のボタンを押して専用チャンネルを作成し、ゲームを始めてください✨\n"
-                    "作成されたチャンネルはあなたと管理者だけが見ることができます"
+                    "下のボタンを押してゲームを始めてください✨\n"
+                    "✅ チャンネル作成不要・すぐ遊べます"
                 ),
                 color=0x2ECC71
             )
-            await inter.response.send_message(embed=em, view=MinesCreatePanelView())
+            await inter.response.send_message(embed=em, view=MinesWebStartView())
             await inter.followup.send("✅ パネル設置完了", ephemeral=True)
         print("  ✅ マインスコマンド登録完了")
 
@@ -248,6 +275,8 @@ class YWPBot(commands.Bot):
         asyncio.create_task(ranking_panel.auto_update_task(self))
         print("✅ ランキング自動更新タスク起動完了")
 
+        self._ready_done = True
+
 bot_main = YWPBot()
 
 # ==================================================
@@ -260,7 +289,6 @@ if TOKEN_SUB:
     intents_sub = discord.Intents.default()
     intents_sub.message_content = True
     intents_sub.members = True
-
     class SubBot(discord.Client):
         def __init__(self):
             super().__init__(intents=intents_sub)
@@ -273,7 +301,6 @@ if TOKEN_SUB:
             print(f"\n========== サブBot 起動 ==========")
             print(f"✅ ログイン：{self.user}")
             print("✅ サブBot 準備完了\n")
-
     bot_sub = SubBot()
 else:
     print("⚠️ 環境変数 DISCORD_TOKEN_SUB が未設定 → サブBotは起動しません")
@@ -289,6 +316,8 @@ async def on_message(message):
 
 @bot_main.event
 async def on_ready():
+    if bot_main._ready_done:
+        return
     print(f"\n========== メインBot 起動 ==========")
     print(f"✅ Logged in as {bot_main.user} ({bot_main.user.id})")
     print(f"📡 接続サーバー: {len(bot_main.guilds)}件")
