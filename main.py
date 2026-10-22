@@ -95,7 +95,7 @@ def run_web_server():
     if not WEB_AVAILABLE:
         return
     try:
-        flask_app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+        flask_app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False)
     except Exception as e:
         print(f"❌ ウェブサーバー起動エラー: {e}")
 
@@ -123,7 +123,7 @@ class YWPBot(commands.Bot):
         if WEB_AVAILABLE:
             web_thread = threading.Thread(target=run_web_server, daemon=True)
             web_thread.start()
-            print("✅ ウェブサーバー起動完了 :5000")
+            print("✅ ウェブサーバー起動完了 :8080")
 
         # --- Cog読み込み ---
         cogs = [
