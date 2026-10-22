@@ -137,7 +137,7 @@ class YWPBot(commands.Bot):
             from features.backup_panel import BackupPanelView, RestoreConfirmView
             from features.command_list_panel import CommandListView
             from features.elevator_panel import ElevatorView
-            from features.mines_panel import MinesCreatePanelView, MinesSelectView
+            from features.mines_panel import MinesWebStartView
 
             views_to_register = [
                 (LotteryPanelView, "LotteryPanelView"),
