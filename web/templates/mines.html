@@ -5,24 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>💎 マインス</title>
     <style>
-        * { box-sizing: border-box; font-family: sans-serif; }
-        body { background: #1a1a2e; color: #fff; padding: 20px; text-align: center; }
-        .container { max-width: 500px; margin: 0 auto; }
-        h1 { color: #ffd700; }
-        .status { background: #16213e; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
-        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 20px 0; }
-        .cell { aspect-ratio: 1; font-size: 24px; border: none; border-radius: 8px; cursor: pointer; background: #0f3460; color: #fff; transition: 0.2s; }
-        .cell:hover { background: #e94560; transform: scale(1.05); }
+        * { box-sizing: border-box; font-family: "Segoe UI", sans-serif; }
+        body { background: #0f172a; color: #fff; padding: 20px; text-align: center; min-height: 100vh; }
+        .container { max-width: 520px; margin: 0 auto; }
+        h1 { color: #ffd700; margin-bottom: 20px; }
+        .status { background: #1e293b; padding: 18px; border-radius: 12px; margin-bottom: 20px; }
+        .balance { font-size: 1.2rem; color: #22d3ee; margin-bottom: 8px; }
+        .multiplier { font-size: 1.4rem; font-weight: bold; color: #facc15; }
+        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 25px 0; }
+        .cell { aspect-ratio: 1; font-size: 26px; border: none; border-radius: 10px; cursor: pointer; background: #334155; color: #fff; transition: 0.25s; }
+        .cell:hover:not(.opened) { background: #ef4444; transform: scale(1.08); }
         .cell.opened { cursor: default; }
-        .cell.bomb { background: #e94560; }
-        .cell.gem { background: #2ecc71; }
-        .controls { margin: 20px 0; }
-        button { padding: 12px 24px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; margin: 5px; }
-        .btn-start { background: #2ecc71; color: #fff; }
-        .btn-cash { background: #ffd700; color: #000; }
-        .input-group { margin: 10px 0; }
-        input { padding: 10px; font-size: 16px; border-radius: 5px; border: none; width: 200px; }
-        select { padding: 10px; font-size: 16px; border-radius: 5px; border: none; }
+        .cell.bomb { background: #dc2626; }
+        .cell.gem { background: #16a34a; }
+        .controls { background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 15px; }
+        select, input, button { padding: 12px 16px; font-size: 1rem; border-radius: 8px; border: none; margin: 5px; }
+        select { background: #334155; color: #fff; width: 180px; }
+        input { background: #334155; color: #fff; width: 200px; }
+        .btn-start { background: #16a34a; color: #fff; font-weight: bold; cursor: pointer; }
+        .btn-cash { background: #facc15; color: #000; font-weight: bold; cursor: pointer; display: none; }
+        .btn-start:disabled, .btn-cash:disabled { opacity: 0.5; cursor: not-allowed; }
+        .message { margin-top: 20px; font-size: 1.2rem; min-height: 40px; }
+        .info-note { font-size: 0.85rem; color: #94a3b8; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -30,118 +34,147 @@
         <h1>💎 マインス 💣</h1>
 
         <div class="status">
-            <div>ユーザーID: <input type="text" id="user_id" placeholder="DiscordユーザーID" value="123456789"></div>
-            <div id="balance-display">保有ポイント: ---</div>
-            <div id="multiplier-display">倍率: 1.0x</div>
+            <div class="balance">💰 保有: <span id="balance">---</span> ポイント</div>
+            <div class="multiplier">✨ 倍率: <span id="multiplier">1.0</span>x</div>
         </div>
 
         <div class="controls">
             <select id="bombs">
-                <option value="3">✅ かんたん 3個</option>
-                <option value="5" selected>⚪ ふつう 5個</option>
-                <option value="8">🔴 むずかしい 8個</option>
-                <option value="12">⚙️ むずかしい 12個</option>
+                <option value="3">✅ かんたん 爆弾3個</option>
+                <option value="5" selected>⚪ ふつう 爆弾5個</option>
+                <option value="8">🔴 むずかしい 爆弾8個</option>
+                <option value="12">⚙️ 超むずかしい 爆弾12個</option>
+                <option value="24">💀 極悪 爆弾24個</option>
             </select>
-            <input type="number" id="bet" placeholder="賭け額" value="1000">
-            <button class="btn-start" onclick="startGame()">ゲーム開始</button>
+            <br>
+            <input type="text" id="bet" placeholder="賭け額 (例: 1京 / オールベット)" value="1000">
+            <br>
+            <button class="btn-start" id="start-btn" onclick="startGame()">🎮 ゲーム開始</button>
+            <button class="btn-cash" id="cashout-btn" onclick="cashout()">💰 この倍率で回収</button>
+            <div class="info-note">単位: 万/億/兆/京/垓/無量大数 対応</div>
         </div>
 
-        <div class="grid" id="grid">
-            <!-- 盤面はJSで生成 -->
-        </div>
-
-        <button class="btn-cash" id="cashout-btn" onclick="cashout()" style="display:none;">💰 この倍率で回収</button>
-        <div id="message"></div>
+        <div class="grid" id="grid"></div>
+        <div class="message" id="message"></div>
     </div>
 
     <script>
+        const token = "{{ token }}";
         let gameActive = false;
+        let gameState = { opened: [], bombs: [] };
 
-        function renderGrid(opened=[], gridState=[]) {
-            const grid = document.getElementById('grid');
-            grid.innerHTML = '';
+        // 残高取得
+        async function loadBalance() {
+            const res = await fetch("/balance", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token })
+            });
+            const data = await res.json();
+            if (data.balance !== undefined) {
+                document.getElementById("balance").textContent = Number(data.balance).toLocaleString();
+            }
+        }
+
+        // 盤面描画
+        function renderGrid() {
+            const grid = document.getElementById("grid");
+            grid.innerHTML = "";
             for (let i = 0; i < 25; i++) {
-                const cell = document.createElement('button');
-                cell.className = 'cell';
-                if (opened[i]) {
-                    cell.classList.add('opened');
-                    cell.textContent = gridState[i] === 'bomb' ? '💣' : '💎';
-                    if (gridState[i] === 'bomb') cell.classList.add('bomb');
-                    else cell.classList.add('gem');
+                const cell = document.createElement("button");
+                cell.className = "cell";
+                if (gameState.opened[i]) {
+                    cell.classList.add("opened");
+                    cell.textContent = gameState.bombs[i] ? "💣" : "💎";
+                    cell.classList.add(gameState.bombs[i] ? "bomb" : "gem");
                 } else if (gameActive) {
-                    cell.textContent = '□';
+                    cell.textContent = "□";
                     cell.onclick = () => openCell(i);
                 } else {
-                    cell.textContent = '□';
+                    cell.textContent = "□";
                 }
                 grid.appendChild(cell);
             }
         }
 
         async function startGame() {
-            const user_id = document.getElementById('user_id').value;
-            const bombs = parseInt(document.getElementById('bombs').value);
-            const bet = parseInt(document.getElementById('bet').value);
+            const bombs = parseInt(document.getElementById("bombs").value);
+            const bet = document.getElementById("bet").value.trim();
 
-            const res = await fetch('/start', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({user_id, bombs, bet})
+            const res = await fetch("/start", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token, bombs, bet })
             });
             const data = await res.json();
+            
             if (!res.ok) return alert(data.error);
 
             gameActive = true;
-            document.getElementById('balance-display').textContent = `保有ポイント: ${data.balance?.toLocaleString()}`;
-            document.getElementById('multiplier-display').textContent = '倍率: 1.0x';
-            document.getElementById('cashout-btn').style.display = 'inline-block';
-            document.getElementById('message').textContent = '';
+            gameState = { opened: Array(25).fill(false), bombs: [] };
+            document.getElementById("balance").textContent = Number(data.balance).toLocaleString();
+            document.getElementById("multiplier").textContent = "1.0";
+            document.getElementById("cashout-btn").style.display = "inline-block";
+            document.getElementById("start-btn").disabled = true;
+            document.getElementById("message").textContent = "";
             renderGrid();
         }
 
         async function openCell(idx) {
-            const user_id = document.getElementById('user_id').value;
-            const res = await fetch('/open', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({user_id, index: idx})
+            const res = await fetch("/open", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token, index: idx })
             });
             const data = await res.json();
 
-            if (data.result === 'lose') {
+            gameState.opened[idx] = true;
+
+            if (data.result === "lose") {
                 gameActive = false;
-                document.getElementById('balance-display').textContent = `保有ポイント: ${data.balance?.toLocaleString()}`;
-                document.getElementById('cashout-btn').style.display = 'none';
-                document.getElementById('message').innerHTML = '<h3 style="color:red;">💣 爆弾！</h3>';
-                renderGrid(Array(25).fill(true), activeGameGrid);
-            } else if (data.result === 'win') {
+                gameState.bombs = data.all_bombs.map(() => true);
+                document.getElementById("balance").textContent = Number(data.balance).toLocaleString();
+                document.getElementById("cashout-btn").style.display = "none";
+                document.getElementById("start-btn").disabled = false;
+                document.getElementById("message").innerHTML = '<span style="color:#ef4444; font-weight:bold;">💥 爆弾が出ました！</span>';
+                gameState.opened = Array(25).fill(true);
+                gameState.bombs = Array(25).fill(false);
+                data.all_bombs.forEach(i => gameState.bombs[i] = true);
+                renderGrid();
+            } else if (data.result === "win") {
                 gameActive = false;
-                document.getElementById('balance-display').textContent = `保有ポイント: ${data.balance?.toLocaleString()}`;
-                document.getElementById('multiplier-display').textContent = `倍率: ${data.multiplier}x`;
-                document.getElementById('cashout-btn').style.display = 'none';
-                document.getElementById('message').innerHTML = `<h3 style="color:gold;">🎉 全開け！ +${data.amount?.toLocaleString()}</h3>`;
+                document.getElementById("balance").textContent = Number(data.balance).toLocaleString();
+                document.getElementById("multiplier").textContent = data.multiplier;
+                document.getElementById("cashout-btn").style.display = "none";
+                document.getElementById("start-btn").disabled = false;
+                document.getElementById("message").innerHTML = `<span style="color:#facc15; font-weight:bold;">🎉 全て開けました！ +${Number(data.amount).toLocaleString()} ポイント</span>`;
+                gameState.opened = Array(25).fill(true);
+                renderGrid();
             } else {
-                document.getElementById('multiplier-display').textContent = `倍率: ${data.multiplier}x`;
-                renderGrid([...document.querySelectorAll('.cell')].map((_,i) => i === idx ? true : opened[i]), []);
+                document.getElementById("multiplier").textContent = data.multiplier;
+                renderGrid();
             }
         }
 
         async function cashout() {
-            const user_id = document.getElementById('user_id').value;
-            const res = await fetch('/cashout', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({user_id})
+            const res = await fetch("/cashout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token })
             });
             const data = await res.json();
+            
             if (!res.ok) return alert(data.error);
 
             gameActive = false;
-            document.getElementById('balance-display').textContent = `保有ポイント: ${data.balance?.toLocaleString()}`;
-            document.getElementById('cashout-btn').style.display = 'none';
-            document.getElementById('message').innerHTML = `<h3 style="color:green;">💰 回収！ +${data.amount?.toLocaleString()}</h3>`;
+            document.getElementById("balance").textContent = Number(data.balance).toLocaleString();
+            document.getElementById("multiplier").textContent = data.multiplier;
+            document.getElementById("cashout-btn").style.display = "none";
+            document.getElementById("start-btn").disabled = false;
+            document.getElementById("message").innerHTML = `<span style="color:#22d3ee; font-weight:bold;">💰 回収成功！ +${Number(data.amount).toLocaleString()} ポイント</span>`;
         }
 
+        loadBalance();
         renderGrid();
     </script>
 </body>
