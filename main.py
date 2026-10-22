@@ -165,8 +165,7 @@ class YWPBot(commands.Bot):
                 (voice_panel.VoiceCreatePanelView, "VoiceCreatePanelView"),
                 (ranking_panel.RankingPanelView, "RankingPanelView"),
                 (ElevatorView, "ElevatorView"),
-                (MinesCreatePanelView, "MinesCreatePanelView"),
-                (MinesSelectView, "MinesSelectView"),
+                (MinesWebStartView, "MinesWebStartView"),
             ]
             for view_cls, name in views_to_register:
                 instance = check_view_no_args(view_cls, name)
