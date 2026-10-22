@@ -4,3 +4,4 @@ qrcode[pil]>=7.4
 pycryptodome
 requests
 flask
+aiohttp
