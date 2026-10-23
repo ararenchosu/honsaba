@@ -12,7 +12,7 @@ DATA_FILE = "kn_points_data.json"
 HISTORY_FILE = "mines_history.json"
 
 # ✅ ウェブサーバーのアドレス（自分の環境に合わせて変更）
-WEB_BASE_URL = "https://app-13cf74ce.fadehost.app"
+WEB_BASE_URL = "https://app-e9b4a977.fadehost.app"
 
 UNIT_SCALE = {
     "無量大数": 10**68, "那由多": 10**64, "不可思議": 10**60,
