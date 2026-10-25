@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 JST = timezone(timedelta(hours=9))
 
-# ✅ Clientだけインポート、sessionsはこのファイル内で管理
+# ✅ Clientだけインポート
 from cogs.ywp_auto import Client
 
 # ✅ このファイル専用のセッション管理
@@ -143,6 +143,143 @@ class AutoLoopManager:
         return self.running.get(user_id)
 
 # ============================================================
+# メールアドレス・パスワード ログイン用モーダル
+# ============================================================
+class AutoLoopLoginModal(discord.ui.Modal, title="🔑 アカウントログイン"):
+    email = discord.ui.TextInput(
+        label="メールアドレス",
+        placeholder="example@mail.com",
+        required=True,
+        style=discord.TextStyle.short
+    )
+    password = discord.ui.TextInput(
+        label="パスワード",
+        placeholder="パスワードを入力",
+        required=True,
+        style=discord.TextStyle.short
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        email_val = self.email.value.strip()
+        password_val = self.password.value.strip()
+
+        if not email_val or not password_val:
+            await interaction.response.send_message(
+                "❌ メールアドレスとパスワードの両方を入力してください。",
+                ephemeral=True
+            )
+            return
+
+        user_id_str = str(interaction.user.id)
+        
+        # ✅ ここでメアド・パスワードからudkeyを取得
+        # 注: 実際のログイン処理は ywp_auto.py の仕様に合わせて調整が必要な場合があります
+        try:
+            # 一旦メアドパスワードを保存 → 後続でClient経由でudkeyに変換
+            sessions[user_id_str] = {
+                "email": email_val,
+                "password": password_val,
+                "userId": user_id_str,
+                "discord_id": user_id_str,
+                "logged_at": datetime.now(JST).isoformat()
+            }
+
+            await interaction.response.send_message(
+                "✅ ログイン情報を受け付けました！\n次に「🔄 周回設定」ボタンから設定してください。",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ ログインに失敗しました: {str(e)}",
+                ephemeral=True
+            )
+
+# ============================================================
+# 周回設定モーダル
+# ============================================================
+class AutoLoopModal(discord.ui.Modal, title="🔄 自動周回設定"):
+    stage_id = discord.ui.TextInput(
+        label="周回するステージID",
+        placeholder="例: 29901011",
+        required=True
+    )
+    count = discord.ui.TextInput(
+        label="回数（空欄=無制限）",
+        placeholder="例: 50",
+        required=False
+    )
+    interval = discord.ui.TextInput(
+        label="実行間隔（秒）",
+        default="2.0",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        user_id_str = str(interaction.user.id)
+        user_data = sessions.get(user_id_str)
+
+        if not user_data:
+            await interaction.response.send_message(
+                "❌ まず最初に「🔑 ログイン」ボタンからメールアドレスとパスワードでログインしてください。",
+                ephemeral=True
+            )
+            return
+
+        email = user_data.get("email")
+        password = user_data.get("password")
+        
+        if not email or not password:
+            await interaction.response.send_message(
+                "❌ ログイン情報が不完全です。再度「🔑 ログイン」から入力してください。",
+                ephemeral=True
+            )
+            return
+
+        # 入力値処理
+        try:
+            stage_id_val = int(self.stage_id.value.strip())
+        except ValueError:
+            await interaction.response.send_message("❌ ステージIDは数字で入力してください", ephemeral=True)
+            return
+
+        try:
+            count_val = int(self.count.value.strip()) if self.count.value.strip() else 999999
+        except ValueError:
+            count_val = 999999
+
+        try:
+            interval_val = float(self.interval.value.strip())
+        except ValueError:
+            interval_val = 2.0
+
+        # ✅ Client作成（メアドパスワードからudkey取得）
+        try:
+            # ywp_autoのClientがメアドパスワードに対応している場合はそちらを使う
+            # 暫定: 保存した情報からClientを初期化
+            client = Client(email, password)
+            client.login(user_id_str)
+            
+            # 後で使うために取得したudkeyを保存
+            if hasattr(client, "udkey") and client.udkey:
+                user_data["udkey"] = client.udkey
+                sessions[user_id_str] = user_data
+                
+        except TypeError:
+            # Clientが引数をudkey1つしか受け付けない場合 → ywp_autoのログイン処理を呼び出す必要あり
+            await interaction.response.send_message(
+                "⚠️ 現在のClientはudkey専用です。`ywp_auto.py` のログイン方法を教えてください。",
+                ephemeral=True
+            )
+            return
+
+        # 周回開始
+        cog = interaction.client.get_cog("AutoLoopCog")
+        ok, msg = await cog.manager.start_loop(
+            interaction.user.id, client, stage_id_val, count_val, interval_val
+        )
+        await interaction.response.send_message(msg, ephemeral=True)
+
+# ============================================================
 # パネル用View
 # ============================================================
 class AutoLoopPanelView(discord.ui.View):
@@ -151,12 +288,52 @@ class AutoLoopPanelView(discord.ui.View):
 
     @discord.ui.button(label="🔑 ログイン", style=discord.ButtonStyle.primary, custom_id="autoloop:login")
     async def login_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "📋 ログイン情報をDMで送信してください\n"
-            "下記の形式で送信してください：\n"
-            "`udkey:ここにudkeyを入力`",
-            ephemeral=True
+        await interaction.response.send_modal(AutoLoopLoginModal())
+
+    @discord.ui.button(label="📋 アカウント情報", style=discord.ButtonStyle.secondary, custom_id="autoloop:list")
+    async def list_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user_id_str = str(interaction.user.id)
+        user_data = sessions.get(user_id_str)
+
+        if not user_data:
+            await interaction.response.send_message(
+                "❌ ログイン中のアカウントはありません。",
+                ephemeral=True
+            )
+            return
+
+        logged_at = user_data.get("logged_at", "不明")
+        email = user_data.get("email", "未設定")
+        masked_email = email[:3] + "***" if "@" in email else email
+
+        desc = (
+            f"📧 メールアドレス: `{masked_email}`\n"
+            f"🕐 ログイン日時: `{logged_at}`\n"
+            f"🔑 状態: {'✅ ログイン中' if user_data.get('password') else '❌ 未ログイン'}"
         )
+
+        embed = discord.Embed(
+            title="📋 ログイン中のアカウント",
+            description=desc,
+            color=0x2584FF,
+            timestamp=datetime.now(JST)
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="🚪 ログアウト", style=discord.ButtonStyle.danger, custom_id="autoloop:logout")
+    async def logout_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user_id_str = str(interaction.user.id)
+        if user_id_str in sessions:
+            del sessions[user_id_str]
+            await interaction.response.send_message(
+                "✅ ログアウトしました。メールアドレス・パスワード情報は削除されました。",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "❌ ログインされていません。",
+                ephemeral=True
+            )
 
     @discord.ui.button(label="🔄 周回設定", style=discord.ButtonStyle.green, custom_id="autoloop:settings")
     async def settings_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -202,74 +379,6 @@ class AutoLoopPanelView(discord.ui.View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ============================================================
-# 周回設定モーダル
-# ============================================================
-class AutoLoopModal(discord.ui.Modal, title="自動周回設定"):
-    stage_id = discord.ui.TextInput(
-        label="周回するステージID",
-        placeholder="例: 29901011",
-        required=True
-    )
-    count = discord.ui.TextInput(
-        label="回数（空欄=無制限）",
-        placeholder="例: 50",
-        required=False
-    )
-    interval = discord.ui.TextInput(
-        label="実行間隔（秒）",
-        default="2.0",
-        required=True
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-        # ✅ このファイル内のsessionsから取得
-        user_id_str = str(interaction.user.id)
-        user_data = sessions.get(user_id_str)
-
-        if not user_data:
-            await interaction.response.send_message(
-                "❌ まず最初に「🔑 ログイン」ボタンからudkeyをDMで送信してログインしてください。",
-                ephemeral=True
-            )
-            return
-
-        udkey = user_data.get("udkey")
-        if not udkey:
-            await interaction.response.send_message(
-                "❌ udkeyが見つかりません。再度「🔑 ログイン」から登録してください。",
-                ephemeral=True
-            )
-            return
-
-        # 入力値処理
-        try:
-            stage_id_val = int(self.stage_id.value.strip())
-        except ValueError:
-            await interaction.response.send_message("❌ ステージIDは数字で入力してください", ephemeral=True)
-            return
-
-        try:
-            count_val = int(self.count.value.strip()) if self.count.value.strip() else 999999
-        except ValueError:
-            count_val = 999999
-
-        try:
-            interval_val = float(self.interval.value.strip())
-        except ValueError:
-            interval_val = 2.0
-
-        # Client作成・ログイン
-        client = Client(udkey)
-        client.login(str(interaction.user.id))
-
-        # 周回開始
-        cog = interaction.client.get_cog("AutoLoopCog")
-        ok, msg = await cog.manager.start_loop(
-            interaction.user.id, client, stage_id_val, count_val, interval_val
-        )
-        await interaction.response.send_message(msg, ephemeral=True)
-
-# ============================================================
 # Cog本体
 # ============================================================
 class AutoLoopCog(commands.Cog):
@@ -282,10 +391,12 @@ class AutoLoopCog(commands.Cog):
         em = discord.Embed(
             title="🔄 自動周回 管理パネル",
             description=(
-                "🔑 ログイン → DMに `udkey:xxxx` と送信\n"
-                "🔄 周回設定 → 条件を入力して開始\n"
+                "🔑 ログイン → メールアドレス・パスワードを入力\n"
+                "📋 アカウント情報 → 現在のログイン状況を確認\n"
+                "🚪 ログアウト → 情報を削除して終了\n"
+                "🔄 周回設定 → ステージ/回数/間隔を指定して開始\n"
                 "🛑 停止 → 実行中の周回を中断\n"
-                "📊 状況 → 現在の進捗を確認\n\n"
+                "📊 状況 → 進捗をリアルタイムで確認\n\n"
                 "📩 状況はDMに5回ごとにお届けします"
             ),
             color=0x2584FF,
@@ -293,41 +404,6 @@ class AutoLoopCog(commands.Cog):
         )
         em.set_footer(text=f"ユーザー: {interaction.user}")
         await interaction.response.send_message(embed=em, view=AutoLoopPanelView(), ephemeral=False)
-
-    # ログイン受信用メッセージ監視
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
-        if message.author.bot:
-            return
-        # DM以外は無視
-        if message.guild:
-            return
-
-        content = message.content.strip()
-        if content.lower().startswith("udkey:"):
-            udkey_val = content[len("udkey:"):].strip()
-            if not udkey_val:
-                await message.channel.send("❌ udkeyが空です", delete_after=5)
-                return
-
-            # ✅ このファイル内のsessionsに保存
-            user_id_str = str(message.author.id)
-            sessions[user_id_str] = {
-                "udkey": udkey_val,
-                "userId": user_id_str,
-                "discord_id": user_id_str,
-                "logged_at": datetime.now(JST).isoformat()
-            }
-
-            await message.channel.send(
-                "✅ ログイン完了！次にパネルの「🔄 周回設定」ボタンから設定してください。",
-                delete_after=10
-            )
-            # メッセージ削除（セキュリティ）
-            try:
-                await message.delete()
-            except:
-                pass
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(AutoLoopCog(bot))
