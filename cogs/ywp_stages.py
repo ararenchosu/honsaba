@@ -5,7 +5,6 @@ import asyncio
 import json
 import os
 from datetime import datetime
-
 from cogs.ywp_auto import Client
 
 # ============================================================
@@ -13,10 +12,11 @@ from cogs.ywp_auto import Client
 # ============================================================
 DATA_DIR = "data"
 SESSION_FILE = f"{DATA_DIR}/sessions.json"
+NEW_PATTERNS_FILE = f"{DATA_DIR}/new_patterns.json"  # 新規パターン記録用
 
+os.makedirs(DATA_DIR, exist_ok=True)
 
 def load_sessions() -> dict:
-    os.makedirs(DATA_DIR, exist_ok=True)
     if not os.path.exists(SESSION_FILE):
         return {}
     try:
@@ -25,65 +25,76 @@ def load_sessions() -> dict:
     except json.JSONDecodeError:
         return {}
 
+def save_new_pattern(prefix: str, example_id: int):
+    """新しいパターンを記録"""
+    patterns = {}
+    if os.path.exists(NEW_PATTERNS_FILE):
+        try:
+            with open(NEW_PATTERNS_FILE, "r", encoding="utf-8") as f:
+                patterns = json.load(f)
+        except: pass
+    if prefix not in patterns:
+        patterns[prefix] = {
+            "first_seen": datetime.now().isoformat(),
+            "example_id": example_id,
+            "count": 1
+        }
+    else:
+        patterns[prefix]["count"] += 1
+    with open(NEW_PATTERNS_FILE, "w", encoding="utf-8") as f:
+        json.dump(patterns, f, ensure_ascii=False, indent=2)
 
 # ============================================================
-# ステージ分類ルール（自由に編集）
+# ステージ分類ルール（先頭4桁で判定）
 # ============================================================
-STAGE_CATEGORIES = [
-    {
-        "name": "📖 メインステージ",
-        "pattern": lambda sid: str(sid).startswith(("1001", "1002", "1003")),
-    },
-    {
-        "name": "📖 メイン（2章以降）",
-        "pattern": lambda sid: str(sid).startswith("1901"),
-    },
-    {
-        "name": "🎯 サブステージ",
-        "pattern": lambda sid: str(sid).startswith(("5001", "5002", "5003", "5004",
-                                                    "5005", "5006", "5007", "5008",
-                                                    "5009", "5010", "5011")),
-    },
-    {
-        "name": "🎪 イベントステージ",
-        "pattern": lambda sid: str(sid).startswith("9002"),
-    },
-    {
-        "name": "💪 強敵ステージ",
-        "pattern": lambda sid: str(sid).startswith(("2880", "2890")),
-    },
-    {
-        "name": "🌙 夜叉ステージ",
-        "pattern": lambda sid: str(sid).startswith("2900"),
-    },
-    {
-        "name": "❓ その他",
-        "pattern": lambda sid: True,
-    },
-]
-
+CATEGORY_MAP = {
+    # メインステージ
+    "1001": "📖 メインステージ",
+    "1002": "📖 メインステージ",
+    "1003": "📖 メインステージ",
+    # メイン2章以降
+    "1901": "📖 メイン（2章以降）",
+    # サブステージ
+    "5001": "🎯 サブステージ",
+    "5002": "🎯 サブステージ",
+    "5003": "🎯 サブステージ",
+    "5004": "🎯 サブステージ",
+    "5005": "🎯 サブステージ",
+    "5006": "🎯 サブステージ",
+    "5007": "🎯 サブステージ",
+    "5008": "🎯 サブステージ",
+    "5009": "🎯 サブステージ",
+    "5010": "🎯 サブステージ",
+    "5011": "🎯 サブステージ",
+    # イベント
+    "9002": "🎪 イベントステージ",
+    # 強敵
+    "2880": "💪 強敵ステージ",
+    "2890": "💪 強敵ステージ",
+    # 夜叉
+    "2900": "🌙 夜叉ステージ",
+}
 
 def categorize_stages(stage_ids: list) -> dict:
+    """ステージIDを自動分類 — 未知のパターンは記録して「その他」へ"""
     result = {}
-    assigned = set()
-
-    for cat in STAGE_CATEGORIES:
-        name = cat["name"]
-        bucket = []
-        for sid in stage_ids:
-            if sid in assigned:
-                continue
-            try:
-                if cat["pattern"](sid):
-                    bucket.append(sid)
-                    assigned.add(sid)
-            except Exception:
-                pass
-        if bucket:
-            result[name] = bucket
-
+    for sid in sorted(stage_ids):
+        s = str(sid)
+        prefix4 = s[:4] if len(s) >= 4 else s
+        
+        # 登録済みパターンで判定
+        if prefix4 in CATEGORY_MAP:
+            cat_name = CATEGORY_MAP[prefix4]
+        else:
+            # 未知のパターン → 記録してその他へ
+            save_new_pattern(prefix4, sid)
+            cat_name = "❓ その他（新規パターン検出）"
+        
+        if cat_name not in result:
+            result[cat_name] = []
+        result[cat_name].append(sid)
+    
     return result
-
 
 # ============================================================
 # 3秒対策
@@ -96,7 +107,6 @@ async def safe_defer(interaction: discord.Interaction, ephemeral: bool = True, t
     except (discord.NotFound, discord.HTTPException):
         return False
 
-
 async def safe_reply(interaction: discord.Interaction, **kwargs):
     try:
         if interaction.response.is_done():
@@ -105,7 +115,6 @@ async def safe_reply(interaction: discord.Interaction, **kwargs):
             return await interaction.response.send_message(**kwargs)
     except (discord.NotFound, discord.HTTPException):
         pass
-
 
 # ============================================================
 # ステージパーサ
@@ -129,7 +138,6 @@ def parse_stages(stage_raw: str) -> dict:
         except (ValueError, IndexError):
             pass
     return result
-
 
 # ============================================================
 # Cog
@@ -190,7 +198,7 @@ class YWPStages(commands.Cog):
 
         stages = parse_stages(stage_raw)
 
-        # クリア済みフィルタ
+        # フィルタリング
         if not show_all:
             ids = sorted([sid for sid, info in stages.items() if info["cleared"]])
             label = "クリア済み"
@@ -198,7 +206,6 @@ class YWPStages(commands.Cog):
             ids = sorted(stages.keys())
             label = "全ステージ"
 
-        # キーワードフィルタ
         if keyword:
             kw = keyword.strip()
             ids = [sid for sid in ids if kw in str(sid)]
@@ -210,10 +217,10 @@ class YWPStages(commands.Cog):
                 ephemeral=True
             )
 
-        # 分類
+        # 自動分類
         categorized = categorize_stages(ids)
 
-        # 分類ごとにテキスト化
+        # メッセージ分割
         chunks = []
         current = ""
         for cat_name, cat_ids in categorized.items():
@@ -223,7 +230,6 @@ class YWPStages(commands.Cog):
                 c = cat_ids[i:i+10]
                 body_lines.append(" ".join(f"`{sid}`" for sid in c))
             section = header + "\n".join(body_lines) + "\n"
-
             if len(current) + len(section) > 1900:
                 chunks.append(current)
                 current = section
@@ -235,6 +241,11 @@ class YWPStages(commands.Cog):
         cleared_count = sum(1 for i in stages.values() if i["cleared"])
         total_count = len(stages)
 
+        # 新規パターンがある場合
+        new_pattern_note = ""
+        if "❓ その他（新規パターン検出）" in categorized:
+            new_pattern_note = "\n⚠️ 未登録のIDパターンが検出されました → `data/new_patterns.json` に記録済み"
+
         embed = discord.Embed(
             title=f"🎮 {label}ステージ一覧",
             description=(
@@ -242,21 +253,20 @@ class YWPStages(commands.Cog):
                 f"**クリア済み**: {cleared_count}件 / 全{total_count}件\n"
                 f"**検索**: {keyword if keyword else '（なし）'}\n"
                 f"**使い方**: `/ywp_farm stage:<ID> count:<回数>`"
+                f"{new_pattern_note}"
             ),
             color=0x5865F2,
             timestamp=datetime.now()
         )
         embed.add_field(name="📋 分類", value=chunks[0][:1024], inline=False)
-        embed.set_footer(text="show_all:True で未クリアも表示")
+        embed.set_footer(text="show_all:True で未クリアも表示 | 新規パターンは自動記録")
 
         await safe_reply(interaction, embed=embed, ephemeral=True)
-
         for chunk in chunks[1:]:
             try:
                 await interaction.followup.send(chunk, ephemeral=True)
             except Exception:
                 break
-
 
 # ============================================================
 # setup
