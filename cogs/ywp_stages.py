@@ -12,8 +12,9 @@ from cogs.ywp_auto import Client
 # ============================================================
 DATA_DIR = "data"
 SESSION_FILE = f"{DATA_DIR}/sessions.json"
-LEARNED_RULES_FILE = f"{DATA_DIR}/learned_rules.json"
+EXPORT_DIR = f"{DATA_DIR}/exports"
 os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(EXPORT_DIR, exist_ok=True)
 
 def load_sessions() -> dict:
     if not os.path.exists(SESSION_FILE):
@@ -24,99 +25,31 @@ def load_sessions() -> dict:
     except json.JSONDecodeError:
         return {}
 
-def load_learned_rules() -> dict:
-    """学習済みの分類ルールを読み込み"""
-    if not os.path.exists(LEARNED_RULES_FILE):
-        return {
-            "prefix_map": {},
-            "stats": {}
-        }
-    try:
-        with open(LEARNED_RULES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {"prefix_map": {}, "stats": {}}
-
-def save_learned_rule(prefix: str, category: str):
-    """新しいルールを学習・保存"""
-    rules = load_learned_rules()
-    rules["prefix_map"][prefix] = category
-    rules["stats"][prefix] = {
-        "category": category,
-        "learned_at": datetime.now().isoformat()
-    }
-    with open(LEARNED_RULES_FILE, "w", encoding="utf-8") as f:
-        json.dump(rules, f, ensure_ascii=False, indent=2)
+def save_sessions(sessions: dict):
+    with open(SESSION_FILE, "w", encoding="utf-8") as f:
+        json.dump(sessions, f, ensure_ascii=False, indent=2)
 
 # ============================================================
 # 自動分類エンジン
 # ============================================================
-class AutoClassifier:
-    def __init__(self):
-        # 基本ルール：最初の1回だけ使用、以降は自動学習が優先
-        self.base_rules = {
-            "100": "📖 メインステージ",
-            "190": "📖 メイン（2章以降）",
-            "500": "🎯 サブステージ",
-            "900": "🎪 イベントステージ",
-            "288": "💪 強敵ステージ",
-            "289": "💪 強敵ステージ",
-            "290": "🌙 夜叉ステージ",
-        }
-        # 学習済みルールを読み込み
-        self.learned = load_learned_rules()["prefix_map"]
+CATEGORY_RULES = {
+    "100": "📖 メインステージ",
+    "190": "📖 メイン（2章以降）",
+    "500": "🎯 サブステージ",
+    "900": "🎪 イベントステージ",
+    "288": "💪 強敵ステージ",
+    "289": "💪 強敵ステージ",
+    "290": "🌙 夜叉ステージ",
+}
 
-    def guess_category(self, sid: int) -> str:
-        """IDから自動的にカテゴリを判定 — 学習済み優先"""
-        s = str(sid)
-        prefix3 = s[:3] if len(s) >= 3 else s
-        prefix4 = s[:4] if len(s) >= 4 else s
+def classify_stage(sid: int) -> str:
+    s = str(sid)
+    prefix = s[:3] if len(s) >= 3 else s
+    for key, cat in CATEGORY_RULES.items():
+        if s.startswith(key):
+            return cat
+    return f"❓ 新規:{prefix}"
 
-        # 1. 学習済み4桁一致
-        if prefix4 in self.learned:
-            return self.learned[prefix4]
-        # 2. 学習済み3桁一致
-        if prefix3 in self.learned:
-            return self.learned[prefix3]
-        # 3. 基本ルールで判定
-        if prefix3 in self.base_rules:
-            return self.base_rules[prefix3]
-        # 4. 未知 → パターンを記録して仮分類
-        self._record_unknown(prefix4, sid)
-        return f"❓ 新規:{prefix4}"
-
-    def _record_unknown(self, prefix: str, sid: int):
-        """未知のパターンを記録"""
-        unknown_file = f"{DATA_DIR}/unknown_patterns.json"
-        data = {}
-        if os.path.exists(unknown_file):
-            try:
-                with open(unknown_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except: pass
-        if prefix not in data:
-            data[prefix] = {"examples": [], "first_seen": datetime.now().isoformat()}
-        if len(data[prefix]["examples"]) < 5:
-            data[prefix]["examples"].append(sid)
-        with open(unknown_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    def categorize_all(self, stage_ids: list) -> dict:
-        """全IDを一括自動分類"""
-        result = {}
-        for sid in sorted(stage_ids):
-            cat = self.guess_category(sid)
-            if cat not in result:
-                result[cat] = []
-            result[cat].append(sid)
-        return result
-
-# 分類器をグローバル初期化
-classifier = AutoClassifier()
-
-# ============================================================
-# パーサ・ヘルパー
-# ============================================================
 def parse_stages(stage_raw: str) -> dict:
     result = {}
     if not stage_raw:
@@ -129,208 +62,204 @@ def parse_stages(stage_raw: str) -> dict:
             sid = int(cols[0])
             if not (1 <= sid <= 99999999): continue
             cleared = len(cols) >= 2 and cols[1] == "1"
-            result[sid] = {"cleared": cleared}
+            result[sid] = {"cleared": cleared, "category": classify_stage(sid)}
         except: pass
     return result
 
-async def safe_defer(interaction, ephemeral=True):
-    try:
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=ephemeral, thinking=True)
-        return True
-    except: return False
+def export_to_file(stages: dict, user_id: int) -> str:
+    """解析結果をファイル出力してパスを返す"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{EXPORT_DIR}/stages_{user_id}_{timestamp}.txt"
+    
+    categorized = {}
+    total = len(stages)
+    cleared = sum(1 for v in stages.values() if v["cleared"])
+    
+    for info in stages.values():
+        cat = info["category"]
+        if cat not in categorized:
+            categorized[cat] = {"total": 0, "cleared": 0, "ids": []}
+        categorized[cat]["total"] += 1
+        if info["cleared"]:
+            categorized[cat]["cleared"] += 1
+        categorized[cat]["ids"].append(info)
+    
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write("=" * 50 + "\n")
+        f.write(f"🎮 ステージ解析結果\n")
+        f.write(f"📅 実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"📊 全体: クリア済み {cleared} / {total} 件\n")
+        f.write("=" * 50 + "\n\n")
+        
+        for cat_name, data in categorized.items():
+            f.write(f"{cat_name} （{data['cleared']}/{data['total']}件）\n")
+            f.write("-" * 40 + "\n")
+            lines = []
+            for i in range(0, len(data["ids"]), 15):
+                chunk = data["ids"][i:i+15]
+                line = "  ".join(
+                    f"{'✅' if v['cleared'] else '⬜'}{k}"
+                    for k, v in [(d, stages[d]) for d in stages if stages[d] == d]
+                )
+                lines.append(line)
+            f.write("\n".join(lines))
+            f.write("\n\n")
+    
+    return filename
 
 # ============================================================
-# 🎮 パネルビュー — 動的ボタン
+# 📋 アカウント選択パネル
 # ============================================================
-class AutoStagePanel(ui.View):
-    def __init__(self, stages_data, all_ids, cleared_count, total_count, show_all=False):
+class AccountSelectView(ui.View):
+    def __init__(self, user_id: int):
         super().__init__(timeout=300)
-        self.stages_data = stages_data
-        self.all_ids = all_ids
-        self.cleared_count = cleared_count
-        self.total_count = total_count
-        self.show_all = show_all
-        self.categorized = classifier.categorize_all(all_ids)
-        # 表示順を整理
-        self.display_order = self._sort_categories()
-        self.current_category = self.display_order[0] if self.display_order else "なし"
-        self._build_buttons()
+        self.user_id = user_id
+        self.selected_index = 0
+        sessions = load_sessions()
+        self.accounts = sessions.get(str(user_id), [])
+        if not isinstance(self.accounts, list):
+            self.accounts = [self.accounts] if self.accounts else []
+        
+        self._build_select()
 
-    def _sort_categories(self) -> list:
-        """カテゴリを表示順に並び替え"""
-        priority = {
-            "📖": 1, "🎪": 2, "🎯": 3, "💪": 4, "🌙": 5
-        }
-        cats = list(self.categorized.keys())
-        cats.sort(key=lambda c: (priority.get(c[:2], 99), c))
-        return cats
-
-    def _build_buttons(self):
-        """カテゴリから自動的にボタンを生成"""
+    def _build_select(self):
         self.clear_items()
-        for cat_name in self.display_order:
-            count = len(self.categorized[cat_name])
-            is_active = cat_name == self.current_category
-            btn = ui.Button(
-                label=f"{cat_name} ({count})",
-                style=discord.ButtonStyle.blurple if is_active else discord.ButtonStyle.secondary,
-                custom_id=f"cat:{cat_name}"
+        if not self.accounts:
+            self.add_item(ui.Button(label="ログインしてください", disabled=True))
+            return
+        
+        # アカウント選択メニュー
+        options = [
+            discord.SelectOption(
+                label=f"アカウント {i+1}",
+                description=f"ユーザーID: {acc.get('userId', '不明')}",
+                value=str(i)
             )
-            btn.callback = self._make_callback(cat_name)
-            self.add_item(btn)
-
-    def _make_callback(self, cat_name):
-        async def callback(interaction: discord.Interaction):
-            self.current_category = cat_name
-            self._build_buttons()
-            await interaction.response.edit_message(embed=self._make_embed(), view=self)
-        return callback
-
-    def _make_embed(self) -> discord.Embed:
-        cat_ids = self.categorized.get(self.current_category, [])
-        label = "全ステージ" if self.show_all else "クリア済み"
-
-        # 一覧を整形
-        lines = []
-        for i in range(0, len(cat_ids), 10):
-            chunk = cat_ids[i:i+10]
-            marks = []
-            for sid in chunk:
-                info = self.stages_data.get(sid, {})
-                mark = "✅" if info.get("cleared") else "⬜"
-                marks.append(f"{mark}`{sid}`")
-            lines.append(" ".join(marks))
-
-        desc = (
-            f"**{label}**: {len(self.all_ids)}件  |  "
-            f"**クリア済み**: {self.cleared_count}/{self.total_count}\n"
-            f"**表示中**: {self.current_category} — {len(cat_ids)}件"
+            for i, acc in enumerate(self.accounts)
+        ]
+        select = ui.Select(
+            placeholder="解析するアカウントを選択",
+            options=options
         )
-        if "❓" in self.current_category:
-            desc += "\n⚠️ 新しいパターンを検出！ → 管理者が分類追加できます"
+        select.callback = self.on_select
+        self.add_item(select)
 
-        embed = discord.Embed(
-            title="🎮 ステージ一覧（自動分類）",
-            description=desc,
-            color=0x5865F2,
-            timestamp=datetime.now()
+        # 実行ボタン
+        run_btn = ui.Button(
+            label="🔍 解析を実行",
+            style=discord.ButtonStyle.green
         )
-        if lines:
-            embed.add_field(name="📋 マップ番号", value="\n".join(lines)[:1024], inline=False)
-        else:
-            embed.add_field(name="📋 マップ番号", value="該当なし", inline=False)
-        embed.set_footer(text="ボタンで切り替え｜未知のパターンは自動記録")
-        return embed
+        run_btn.callback = self.run_analysis
+        self.add_item(run_btn)
+
+    async def on_select(self, interaction: discord.Interaction):
+        self.selected_index = int(interaction.data["values"][0])
+        await interaction.response.defer()
+
+    async def run_analysis(self, interaction: discord.Interaction):
+        if not self.accounts:
+            await interaction.response.send_message("❌ ログイン情報がありません", ephemeral=True)
+            return
+        
+        acc = self.accounts[self.selected_index]
+        await interaction.response.send_message(
+            f"🔍 解析を開始します...\nアカウント: `{acc.get('userId', '不明')}`",
+            ephemeral=True
+        )
+        
+        # データ取得
+        try:
+            client = Client(acc["udkey"])
+            client.gdkey = acc["gdkey"]
+            client.userId = acc["userId"]
+            client.token = acc["token"]
+            client.mst = acc.get("mst", 16897)
+            
+            await asyncio.to_thread(client.login, acc["userId"])
+            
+            # トークン更新
+            sessions = load_sessions()
+            sessions[str(self.user_id)][self.selected_index]["token"] = client.token
+            save_sessions(sessions)
+            
+            stage_raw = client.save.get("ywp_user_stage")
+            if not stage_raw:
+                await interaction.followup.send("❌ ステージデータが見つかりません", ephemeral=True)
+                return
+            
+            # 解析
+            stages = parse_stages(stage_raw)
+            if not stages:
+                await interaction.followup.send("❌ 解析できるステージがありません", ephemeral=True)
+                return
+            
+            # ファイル出力
+            filepath = export_to_file(stages, self.user_id)
+            
+            # DM送信
+            try:
+                file = discord.File(filepath, filename=os.path.basename(filepath))
+                await interaction.user.send(
+                    f"✅ 解析完了！\n"
+                    f"📊 ステージ数: {len(stages)} 件\n"
+                    f"📁 ファイル: {os.path.basename(filepath)}",
+                    file=file
+                )
+                await interaction.followup.send(
+                    "✅ 解析結果をDMに送信しました！確認してください📩",
+                    ephemeral=True
+                )
+            except Exception as dm_err:
+                await interaction.followup.send(
+                    f"⚠️ DM送信に失敗しました。ファイルを添付します:\n"
+                    f"※ プライベートチャンネルでご確認ください",
+                    file=discord.File(filepath),
+                    ephemeral=True
+                )
+            
+            # 一時ファイル削除（任意）
+            # os.remove(filepath)
+            
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ 解析エラー: `{str(e)[:200]}`",
+                ephemeral=True
+            )
 
 # ============================================================
 # Cog本体
 # ============================================================
-class AutoStageCog(commands.Cog):
+class StageAnalysisCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="ステージ一覧", description="自動分類＋ボタンパネル表示")
-    @app_commands.describe(
-        keyword="IDで絞り込み（任意）",
-        show_all="未クリアも含めて全表示"
-    )
-    async def stage_list(
-        self,
-        interaction: discord.Interaction,
-        keyword: str = "",
-        show_all: bool = False
-    ):
-        if not await safe_defer(interaction):
-            return
-
-        # セッション確認
+    @app_commands.command(name="ステージ解析", description="アカウントを選んで解析→ファイル出力")
+    async def stage_analysis(self, interaction: discord.Interaction):
         sessions = load_sessions()
-        sdata = sessions.get(str(interaction.user.id))
-        if not sdata:
-            await interaction.followup.send(
-                "❌ 先に `/ywp_login` を実行してください。",
+        user_data = sessions.get(str(interaction.user.id))
+        
+        if not user_data:
+            await interaction.response.send_message(
+                "❌ まず `/ywp_login` でログインしてください。",
                 ephemeral=True
             )
             return
-
-        # ゲームからデータ取得
-        client = Client(sdata["udkey"])
-        client.gdkey = sdata["gdkey"]
-        client.userId = sdata["userId"]
-        client.token = sdata["token"]
-        client.mst = sdata.get("mst", 16897)
-
-        try:
-            await asyncio.to_thread(client.login, sdata["userId"])
-            sessions[str(interaction.user.id)]["token"] = client.token
-            sessions[str(interaction.user.id)]["mst"] = client.mst
-            with open(SESSION_FILE, "w", encoding="utf-8") as f:
-                json.dump(sessions, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            await interaction.followup.send(
-                f"❌ ログイン失敗: `{str(e)[:200]}`",
-                ephemeral=True
-            )
-            return
-
-        stage_raw = client.save.get("ywp_user_stage")
-        if not stage_raw:
-            await interaction.followup.send(
-                "❌ `ywp_user_stage` が見つかりません。",
-                ephemeral=True
-            )
-            return
-
-        # データ解析
-        stages = parse_stages(stage_raw)
-        cleared_count = sum(1 for v in stages.values() if v["cleared"])
-        total_count = len(stages)
-
-        # 絞り込み
-        if show_all:
-            ids = sorted(stages.keys())
-        else:
-            ids = sorted([sid for sid, v in stages.items() if v["cleared"]])
-        if keyword:
-            ids = [sid for sid in ids if keyword in str(sid)]
-        if not ids:
-            await interaction.followup.send(
-                "❌ 該当するステージが見つかりません。",
-                ephemeral=True
-            )
-            return
-
-        # パネル表示
-        panel = AutoStagePanel(stages, ids, cleared_count, total_count, show_all)
-        await interaction.followup.send(
-            embed=panel._make_embed(),
-            view=panel,
-            ephemeral=True
+        
+        # 単アカウントをリスト形式に正規化
+        if not isinstance(user_data, list):
+            sessions[str(interaction.user.id)] = [user_data]
+            save_sessions(sessions)
+        
+        view = AccountSelectView(interaction.user.id)
+        embed = discord.Embed(
+            title="📋 ステージ解析パネル",
+            description=f"登録済みアカウント: {len(view.accounts)} 件\n"
+                        "👇 下から解析するアカウントを選び、「🔍 解析を実行」を押してください",
+            color=0x5865F2
         )
-
-    # 🔧 新規パターンを手動で分類に追加する管理者用コマンド
-    @app_commands.command(name="パターン追加", description="新しいステージパターンを分類に登録")
-    @app_commands.describe(
-        prefix="先頭3～4桁 例:9003",
-        category="カテゴリ名 例:🎪 イベント裏ステージ"
-    )
-    async def add_pattern(
-        self,
-        interaction: discord.Interaction,
-        prefix: str,
-        category: str
-    ):
-        # 必要に応じて管理者権限制限を追加可能
-        save_learned_rule(prefix, category)
-        # 分類器をリロード
-        global classifier
-        classifier = AutoClassifier()
-        await interaction.response.send_message(
-            f"✅ パターン `{prefix}` → `{category}` を登録しました",
-            ephemeral=True
-        )
+        embed.set_footer(text="結果はDMにファイルで送信されます")
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 # ============================================================
 async def setup(bot: commands.Bot):
-    await bot.add_cog(AutoStageCog(bot))
+    await bot.add_cog(StageAnalysisCog(bot))
