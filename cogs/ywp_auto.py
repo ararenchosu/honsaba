@@ -310,9 +310,18 @@ class Client:
     def call(self, name, extra=None):
         if not self.token or self.token == '0':
             raise RuntimeError('先に login() してください')
-        body = {'activeDeckId': 1, 'appVer': APPVER, 'deviceId': self.udkey,
-                'level5UserId': self.gdkey, 'mstVersionVer': self.mst, 'osType': 2,
-                'token': self.token, 'userId': str(self.userId), 'ywpToken': '0'}
+        # ✅ 常に最新のmstを使用
+        body = {
+            'activeDeckId': 1,
+            'appVer': APPVER,
+            'deviceId': self.udkey,
+            'level5UserId': self.gdkey,
+            'mstVersionVer': self.mst,
+            'osType': 2,
+            'token': self.token,
+            'userId': str(self.userId),
+            'ywpToken': '0'
+        }
         if extra:
             body.update(extra)
         rc, j = post_nhn(name, body)
@@ -342,14 +351,16 @@ class Client:
         }
 
     # =============================================================
-    # ✅ アイテムマスター取得（再試行付き）
+    # ✅ アイテムマスター取得（完全版：mst確定→再取得）
     # =============================================================
     def load_item_master(self, force_reload=False):
         if self._item_master_cache is not None and not force_reload:
             return self._item_master_cache
 
-        for attempt in range(3):  # 最大3回再試行
+        for attempt in range(3):
+            print(f"📦 マスター取得試行 {attempt+1}/3 (mst={self.mst})")
             rc, j = self.call('getMaster.nhn', {'key': 'item'})
+            
             if j.get('resultCode') == 0:
                 master_data = j.get('masterItemList') or []
                 self._item_master_cache = [
@@ -361,17 +372,18 @@ class Client:
                 print(f"✅ アイテムマスター読み込み完了: {len(self._item_master_cache)}件")
                 return self._item_master_cache
 
-            # バージョン不一致 → initして更新してから再試行
+            # バージョン関連エラー → initしてmstを確実に更新
             if j.get('resultCode') in (3, 20, 101):
-                print(f"⚠️ マスター不一致 → 更新して再試行 {attempt+1}/3")
-                self.init_nhn()
-                time.sleep(1)
+                print(f"⚠️ コード{j.get('resultCode')} → initしてmst更新")
+                self.init_nhn()  # ここでmstが最新に更新される
+                time.sleep(1.5)
                 continue
 
-            print(f"⚠️ マスター取得失敗: {j}")
+            print(f"⚠️ 不明エラー: {j}")
             time.sleep(1)
 
         print("❌ マスター取得 全試行失敗")
+        print("💡 APPVERまたはSIGNATUREが最新でない可能性があります")
         return []
 
     def search_item_by_name(self, keyword):
@@ -399,7 +411,7 @@ class Client:
         print("=== 所持アイテム一覧 ===")
         for item_id, count in sorted(items.items()):
             info = master_by_id.get(item_id)
-            name = info['name'] if info else f"不明{item_id}"
+            name = info['name'] if info else f"不明ID:{item_id}"
             print(f"ID: {item_id:>6} | {name} × {count}")
         return items
 
