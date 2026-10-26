@@ -352,8 +352,8 @@ async def item_search(interaction: discord.Interaction, keyword: str):
         # ログイン処理（環境に合わせて調整してください）
         # 👇 自分のログイン情報に置き換えてください
         c = YWPAuto.login_email(
-            email="あなたのメールアドレス",
-            pw="あなたのパスワード"
+            email="avtr948b2m4n6sy@rover.info",
+            pw="WdhKpeLbqX"
         )
         
         # 検索実行
