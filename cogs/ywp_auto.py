@@ -338,69 +338,98 @@ class Client:
             'ymoney': int(ymoney) if isinstance(ymoney, (int, float, str)) and str(ymoney).lstrip('-').isdigit() else None,
         }
 
-    # =============================================================
-    # ✅ 【新規追加】アイテムマスター取得・検索機能
-    # =============================================================
-    def load_item_master(self, force_reload=False):
-        """アイテムマスターデータを読み込み（キャッシュがあれば再利用）"""
-        if self._item_master_cache is not None and not force_reload:
-            return self._item_master_cache
-
-        rc, j = self.call('getMaster.nhn', {'key': 'item'})
-        if j.get('resultCode') != 0:
-            print(f"⚠️ マスター取得失敗: {j}")
-            return []
-
-        master_data = j.get('masterItemList') or []
-        # 名前・IDで検索しやすいように整形
-        self._item_master_cache = [
-            {
-                'id': item.get('id'),
-                'name': item.get('name'),
-                'description': item.get('description', ''),
-                'rarity': item.get('rarity', 0),
-                'type': item.get('itemType', 0)
-            }
-            for item in master_data
-        ]
-        print(f"✅ アイテムマスター読み込み完了: {len(self._item_master_cache)}件")
-        return self._item_master_cache
-
-    def search_item_by_name(self, keyword):
-        """アイテム名（部分一致）で検索 → 候補一覧を返す"""
-        master = self.load_item_master()
-        kw = keyword.lower()
-        result = [
-            item for item in master
-            if kw in (item['name'] or '').lower()
-        ]
-        return result
-
-    def get_item_id_by_name(self, keyword):
-        """アイテム名で検索 → 最初にヒットしたIDを返す（複数候補は表示）"""
-        items = self.search_item_by_name(keyword)
+# =============================================================
+# 🔍 アイテム検索コマンド
+# =============================================================
+@bot.tree.command(name="アイテム検索", description="アイテム名からIDを検索")
+@app_commands.describe(
+    keyword="検索するアイテム名（一部でも可）"
+)
+async def item_search(interaction: discord.Interaction, keyword: str):
+    await interaction.response.defer()
+    
+    try:
+        # ログイン処理（環境に合わせて調整してください）
+        # 👇 自分のログイン情報に置き換えてください
+        c = YWPAuto.login_email(
+            email="あなたのメールアドレス",
+            pw="あなたのパスワード"
+        )
+        
+        # 検索実行
+        items = c.search_item_by_name(keyword)
+        
         if not items:
-            print(f"❌ '{keyword}' に一致するアイテムが見つかりません")
-            return None
-        if len(items) > 1:
-            print(f"⚠️ {len(items)}件ヒットしました:")
-            for it in items:
-                print(f"   ID: {it['id']} | {it['name']}")
-            return None
-        print(f"✅ 一致: ID={items[0]['id']} | {items[0]['name']}")
-        return items[0]['id']
+            await interaction.followup.send(
+                f"❌ `{keyword}` に一致するアイテムは見つかりませんでした"
+            )
+            return
+        
+        # 結果を整形
+        embed = discord.Embed(
+            title=f"🔍 アイテム検索: {keyword}",
+            color=discord.Color.blue()
+        )
+        
+        text = ""
+        for it in items[:25]:  # 最大25件まで表示
+            text += f"**ID:** `{it['id']}` — {it['name']}\n"
+        
+        if len(items) > 25:
+            text += f"\n他 {len(items)-25} 件あります"
+        
+        embed.description = text
+        embed.set_footer(text=f"ヒット数: {len(items)}件")
+        
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ エラー: {e}"
+        )
 
-    def show_my_items(self):
-        """所持アイテムを名前付きで一覧表示"""
-        master = self.load_item_master()
+
+# =============================================================
+# 📋 所持アイテム一覧コマンド
+# =============================================================
+@bot.tree.command(name="所持アイテム", description="自分の所持アイテムを一覧表示")
+async def my_items(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    try:
+        c = YWPAuto.login_email(
+            email="あなたのメールアドレス",
+            pw="あなたのパスワード"
+        )
+        
+        # マスター読み込み
+        master = c.load_item_master()
         master_by_id = {it['id']: it for it in master}
-        items = self.items()
-        print("=== 所持アイテム一覧 ===")
+        items = c.items()
+        
+        embed = discord.Embed(
+            title="📋 所持アイテム一覧",
+            color=discord.Color.green()
+        )
+        
+        text = ""
         for item_id, count in sorted(items.items()):
             info = master_by_id.get(item_id)
-            name = info['name'] if info else f"不明{item_id}"
-            print(f"ID: {item_id:>6} | {name} × {count}")
-        return items
+            name = info['name'] if info else f"不明ID:{item_id}"
+            text += f"**{name}** — `{count}`個\n"
+            
+            # 長すぎないように調整
+            if len(text) > 3500:
+                text += "\n※ 表示しきれない項目があります"
+                break
+        
+        embed.description = text
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ エラー: {e}"
+        )
 
     # =============================================================
     # 既存メソッド
