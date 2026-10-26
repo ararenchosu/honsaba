@@ -8,7 +8,10 @@ import zlib
 from urllib.parse import urljoin, urlparse, parse_qs
 from Crypto.Cipher import AES
 import requests
+import discord
+from discord import app_commands
 from discord.ext import commands
+
 # ============================================================================
 # 定数設定
 # ============================================================================
@@ -28,9 +31,7 @@ HDR = {'Accept-Encoding': 'identity', 'User-Agent': UA, 'Accept': 'application/j
        'Content-Type': 'application/json', 'Connection': 'Keep-Alive'}
 RC = {0: 'OK', -1: 'IPブロック/復号不可', 20: 'appVerかマスタ版が古い', 30: '署名の不整合',
       32: 'tokenズレ', 37: 'チュートリアル未完了', 101: 'マスタ版が現行と違う', 202: 'BAN'}
-# Yポイント（Yポ）はアイテムとして持たれている。IDが違う場合はここを書き換える
 YPOINT_ITEM_ID = 80102
-# セーブに含まれる「所持品系」キー（レスポンスから差分取得するのに使う）
 SAVE_PREFIX = 'ywp_user_'
 GAME_CONST = [
     {"constType": 5, "mstKey": "blockComboAdjustNumA", "mstValue": "0.051800"},
@@ -58,8 +59,9 @@ GAME_CONST = [
     {"constType": 5, "mstKey": "skillGaugeIncrementSize2", "mstValue": "1.200000"},
     {"constType": 5, "mstKey": "skillGaugeIncrementSize3", "mstValue": "2.400000"},
 ]
+
 # ============================================================================
-# 暗号化・復号化関数
+# 暗号化・通信関数
 # ============================================================================
 def salt20(body):
     return hashlib.sha1(K + hashlib.sha1(K + b' ' + body).digest()).digest()
@@ -87,9 +89,7 @@ def dec(s):
     return rest[:e + 1] if e >= 0 else rest
 def jbody(obj):
     return json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
-# ============================================================================
-# API通信関数
-# ============================================================================
+
 def post_nhn(name, obj, timeout=30, retry=3):
     for attempt in range(1, retry + 1):
         try:
@@ -125,6 +125,7 @@ def post_nhn(name, obj, timeout=30, retry=3):
                 continue
             return None, {'resultCode': -1, '_error': 'ConnectionError'}
     return None, {'resultCode': -1, '_error': 'Max retries exceeded'}
+
 def active(udkey=None, timeout=30):
     p = {'apkey': APKEY, 'device_cd': '%s_%s' % (MODEL, OSVER), 'device_type_cd': 'Android',
          'sign': 'true', 'version': APPVER}
@@ -143,6 +144,7 @@ def create_gdkey(udkey, timeout=30):
     if not r.get('result'):
         raise RuntimeError('create_gdkey失敗: %s' % r)
     return r['gdkey']['value']
+
 def _parse_forms(html):
     out = []
     for fm in re.finditer(r'<form\b[^>]*>(.*?)</form>', html, re.S | re.I):
@@ -156,6 +158,7 @@ def _parse_forms(html):
                 inputs[nm.group(1)] = vm.group(1) if vm else ''
         out.append({'action': am.group(1) if am else '', 'inputs': inputs})
     return out
+
 def link_email(udkey, email, pw, timeout=25):
     s = requests.Session()
     s.headers.update({'User-Agent': UA, 'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
@@ -185,12 +188,12 @@ def link_email(udkey, email, pw, timeout=25):
     if not fin.get('result'):
         raise RuntimeError('連携finalize失敗: %s' % fin)
     return fin
+
 def rows(s):
     if isinstance(s, str):
         s = json.loads(s) if s.startswith('{') else s
     return [r.split('|') for r in (s or '').split('*') if r] if isinstance(s, str) else (s.get('rows') if isinstance(s, dict) else (s or []))
 def parse_item_rows(s):
-    """'80102|100313*20502|1' 形式を {itemId: 個数} に変換"""
     out = {}
     if not s:
         return out
@@ -206,13 +209,13 @@ def parse_item_rows(s):
             pass
     return out
 def parse_user_data(d):
-    """ywp_user_data を dict にして返す（str でも dict でもOK）"""
     if isinstance(d, str):
         try:
             d = json.loads(d)
         except Exception:
             return {}
     return d if isinstance(d, dict) else {}
+
 # ============================================================================
 # Clientクラス
 # ============================================================================
@@ -224,7 +227,6 @@ class Client:
         self.token = '0'
         self.mst = 16897
         self.save = {}
-        # ✅ マスターデータキャッシュ
         self._item_master_cache = None
 
     def _active_with_gdkeys(self, retries=6):
@@ -284,8 +286,7 @@ class Client:
         rc, j = post_nhn('login.nhn', {
             'appVer': APPVER, 'batteryInfo': BATTERY, 'deviceId': self.udkey,
             'deviceName': MODEL, 'gdkeySignature': sel['gdsig'], 'gdkeyValue': sel['gdkey'],
-            'isL5IDLinked': 1,
-            'level5UserId': sel['gdkey'],
+            'isL5IDLinked': 1, 'level5UserId': sel['gdkey'],
             'modelName': MODEL, 'mstVersionVer': self.mst, 'osType': 2, 'osVersion': OSVER,
             'signNonce': a['sign_nonce'], 'signTimestamp': str(a['sign_timestamp']),
             'signature': SIGNATURE, 'udkeySignature': a['udkey']['signature'],
@@ -338,102 +339,55 @@ class Client:
             'ymoney': int(ymoney) if isinstance(ymoney, (int, float, str)) and str(ymoney).lstrip('-').isdigit() else None,
         }
 
-# =============================================================
-# 🔍 アイテム検索コマンド
-# =============================================================
-@bot.tree.command(name="アイテム検索", description="アイテム名からIDを検索")
-@app_commands.describe(
-    keyword="検索するアイテム名（一部でも可）"
-)
-async def item_search(interaction: discord.Interaction, keyword: str):
-    await interaction.response.defer()
-    
-    try:
-        # ログイン処理（環境に合わせて調整してください）
-        # 👇 自分のログイン情報に置き換えてください
-        c = YWPAuto.login_email(
-            email="avtr948b2m4n6sy@rover.info",
-            pw="WdhKpeLbqX"
-        )
-        
-        # 検索実行
-        items = c.search_item_by_name(keyword)
-        
+    # =============================================================
+    # アイテムマスター検索機能
+    # =============================================================
+    def load_item_master(self, force_reload=False):
+        if self._item_master_cache is not None and not force_reload:
+            return self._item_master_cache
+        rc, j = self.call('getMaster.nhn', {'key': 'item'})
+        if j.get('resultCode') != 0:
+            print(f"⚠️ マスター取得失敗: {j}")
+            return []
+        master_data = j.get('masterItemList') or []
+        self._item_master_cache = [
+            {'id': item.get('id'), 'name': item.get('name'),
+             'description': item.get('description', ''), 'rarity': item.get('rarity', 0),
+             'type': item.get('itemType', 0)}
+            for item in master_data
+        ]
+        print(f"✅ アイテムマスター読み込み完了: {len(self._item_master_cache)}件")
+        return self._item_master_cache
+
+    def search_item_by_name(self, keyword):
+        master = self.load_item_master()
+        kw = keyword.lower()
+        return [i for i in master if kw in (i['name'] or '').lower()]
+
+    def get_item_id_by_name(self, keyword):
+        items = self.search_item_by_name(keyword)
         if not items:
-            await interaction.followup.send(
-                f"❌ `{keyword}` に一致するアイテムは見つかりませんでした"
-            )
-            return
-        
-        # 結果を整形
-        embed = discord.Embed(
-            title=f"🔍 アイテム検索: {keyword}",
-            color=discord.Color.blue()
-        )
-        
-        text = ""
-        for it in items[:25]:  # 最大25件まで表示
-            text += f"**ID:** `{it['id']}` — {it['name']}\n"
-        
-        if len(items) > 25:
-            text += f"\n他 {len(items)-25} 件あります"
-        
-        embed.description = text
-        embed.set_footer(text=f"ヒット数: {len(items)}件")
-        
-        await interaction.followup.send(embed=embed)
-        
-    except Exception as e:
-        await interaction.followup.send(
-            f"❌ エラー: {e}"
-        )
+            print(f"❌ '{keyword}' に一致するアイテムが見つかりません")
+            return None
+        if len(items) > 1:
+            print(f"⚠️ {len(items)}件ヒット:")
+            for it in items:
+                print(f"   ID: {it['id']} | {it['name']}")
+            return None
+        print(f"✅ 一致: ID={items[0]['id']} | {items[0]['name']}")
+        return items[0]['id']
 
-
-# =============================================================
-# 📋 所持アイテム一覧コマンド
-# =============================================================
-@bot.tree.command(name="所持アイテム", description="自分の所持アイテムを一覧表示")
-async def my_items(interaction: discord.Interaction):
-    await interaction.response.defer()
-    
-    try:
-        c = YWPAuto.login_email(
-            email="あなたのメールアドレス",
-            pw="あなたのパスワード"
-        )
-        
-        # マスター読み込み
-        master = c.load_item_master()
+    def show_my_items(self):
+        master = self.load_item_master()
         master_by_id = {it['id']: it for it in master}
-        items = c.items()
-        
-        embed = discord.Embed(
-            title="📋 所持アイテム一覧",
-            color=discord.Color.green()
-        )
-        
-        text = ""
+        items = self.items()
+        print("=== 所持アイテム一覧 ===")
         for item_id, count in sorted(items.items()):
             info = master_by_id.get(item_id)
-            name = info['name'] if info else f"不明ID:{item_id}"
-            text += f"**{name}** — `{count}`個\n"
-            
-            # 長すぎないように調整
-            if len(text) > 3500:
-                text += "\n※ 表示しきれない項目があります"
-                break
-        
-        embed.description = text
-        await interaction.followup.send(embed=embed)
-        
-    except Exception as e:
-        await interaction.followup.send(
-            f"❌ エラー: {e}"
-        )
+            name = info['name'] if info else f"不明{item_id}"
+            print(f"ID: {item_id:>6} | {name} × {count}")
+        return items
 
-    # =============================================================
-    # 既存メソッド
-    # =============================================================
     def master(self, key):
         rc, j = self.call('getMaster.nhn', {'key': key})
         if j.get('resultCode') != 0:
@@ -478,10 +432,7 @@ async def my_items(interaction: discord.Interaction):
         else:
             result_hp = random.randint(700, 800)
         user_erase_num = max(1, erase_num // random.randint(1, 2))
-        user_erase_size = random.randint(
-            int(erase_size_max * 15),
-            int(erase_size_max * 20)
-        )
+        user_erase_size = random.randint(int(erase_size_max * 15), int(erase_size_max * 20))
         users = []
         for i, y in enumerate(yk):
             is_first = (i == 0)
@@ -492,10 +443,8 @@ async def my_items(interaction: discord.Interaction):
                 'eraseSize': user_erase_size if is_first else 0,
                 'eraseSizeMax': erase_size_max if is_first else 0,
                 'linkSizeMax': link_size_max if is_first else 0,
-                'recoveryActual': 0,
-                'recoveryMax': 0,
-                'sSkillUseNum': 0,
-                'skillUseNum': 0,
+                'recoveryActual': 0, 'recoveryMax': 0,
+                'sSkillUseNum': 0, 'skillUseNum': 0,
                 'youkaiId': y.get('youkaiId'),
             })
         enemies = []
@@ -504,76 +453,43 @@ async def my_items(interaction: discord.Interaction):
             lot_youkai_str = e.get('lotYoukaiInfoList') or ''
             item_check_key = lot_item_str.split('|')[0] if lot_item_str else ''
             youkai_check_key = lot_youkai_str.split('|')[0] if lot_youkai_str else ''
-            
-            drop_item_flg = 0
-            drop_item_id = 0
-            drop_treasure_flg = 0
-            drop_treasure_id = 0
-            drop_youkai_flg = 0
-            
+            drop_item_flg = drop_item_id = drop_treasure_flg = drop_treasure_id = drop_youkai_flg = 0
             if item_check_key and item_check_key != '00000':
                 if random.random() < 0.15:
                     drop_item_flg = 1
                     lot_parts = lot_item_str.split('|')
                     if len(lot_parts) >= 2 and lot_parts[1].isdigit():
                         drop_item_id = int(lot_parts[1])
-            
             if youkai_check_key and youkai_check_key != '00000':
                 if random.random() < 0.15:
                     drop_youkai_flg = 1
-            
             enemies.append({
-                'deadEndOrder': i + 1,
-                'deadEndType': 0,
+                'deadEndOrder': i + 1, 'deadEndType': 0,
                 'dropItemCheckKey': item_check_key or '00000',
-                'dropItemFlg': drop_item_flg,
-                'dropItemId': drop_item_id,
-                'dropTreasureFlg': drop_treasure_flg,
-                'dropTreasureId': drop_treasure_id,
+                'dropItemFlg': drop_item_flg, 'dropItemId': drop_item_id,
+                'dropTreasureFlg': drop_treasure_flg, 'dropTreasureId': drop_treasure_id,
                 'dropYoukaiCheckKey': youkai_check_key or '00000',
                 'dropYoukaiFlg': drop_youkai_flg,
-                'enemyId': e.get('enemyId'),
-                'itemId': 0,
-                'useItemLLarge': 0,
-                'useItemLarge': 0,
-                'useItemMiddle': 0,
-                'useItemSmall': 0,
+                'enemyId': e.get('enemyId'), 'itemId': 0,
+                'useItemLLarge': 0, 'useItemLarge': 0, 'useItemMiddle': 0, 'useItemSmall': 0,
             })
         return {
-            'stageId': stageId,
-            'battleType': battleType,
-            'requestId': str(reqId),
-            'damageTotal': dmg,
-            'score': score,
-            'userYoukaiResultList': users,
-            'enemyYoukaiResultList': enemies,
-            'bonusBlockNum': 0,
-            'cheatFlg': 0,
-            'clearTimeLongSec': 0,
-            'clearTimeSec': clear_time_int,
-            'comboMax': combo_max,
-            'eraseNumTotal': erase_num,
-            'eraseSizeAve': f"{erase_size_ave:.2f}",
-            'eraseSizeMax': erase_size_max,
-            'eventPoint': 0,
-            'eventSubPoint': 0,
-            'eventTeamPoint': 0,
-            'feverTimeNum': fever_num,
-            'linkSizeMax': link_size_max,
-            'pauseAtkNum': 0,
-            'recvDamageTotal': 0,
-            'resultRecvAtkNum': 0,
-            'resultYoukaiHP': result_hp,
-            'scoreLog': '',
-            'spMissionIntValue1': 0,
-            'suspendFlg': 0,
-            'themeResultList': [],
-            'ywp_mst_game_const': GAME_CONST,
+            'stageId': stageId, 'battleType': battleType, 'requestId': str(reqId),
+            'damageTotal': dmg, 'score': score,
+            'userYoukaiResultList': users, 'enemyYoukaiResultList': enemies,
+            'bonusBlockNum': 0, 'cheatFlg': 0, 'clearTimeLongSec': 0,
+            'clearTimeSec': clear_time_int, 'comboMax': combo_max,
+            'eraseNumTotal': erase_num, 'eraseSizeAve': f"{erase_size_ave:.2f}",
+            'eraseSizeMax': erase_size_max, 'eventPoint': 0, 'eventSubPoint': 0,
+            'eventTeamPoint': 0, 'feverTimeNum': fever_num, 'linkSizeMax': link_size_max,
+            'pauseAtkNum': 0, 'recvDamageTotal': 0, 'resultRecvAtkNum': 0,
+            'resultYoukaiHP': result_hp, 'scoreLog': '', 'spMissionIntValue1': 0,
+            'suspendFlg': 0, 'themeResultList': [], 'ywp_mst_game_const': GAME_CONST,
         }
 
     def battle(self, stageId, battleType=None, wait=None):
         if battleType is None:
-            battleType = 6 if str(stageId).startswith(('28805', '28904', '29008', '29304')) else 1
+            battleType = 6 if str(stageId).startswith(('28805','28904','29008','29304')) else 1
         rc, js = self.call('gameStart.nhn', {'stageId': stageId, 'battleType': battleType,
                                              'battleCode': '', 'retryFlg': 0})
         if js.get('resultCode') != 0:
@@ -590,16 +506,12 @@ async def my_items(interaction: discord.Interaction):
         if isinstance(d, str):
             d = json.loads(d)
         return d or {}
-
     def youkai(self):
         return [{'id': int(r[0]), 'raw': r} for r in rows(self.save.get('ywp_user_youkai'))]
-
     def items(self):
         return {int(r[0]): int(r[1]) for r in rows(self.save.get('ywp_user_item')) if len(r) >= 2}
-
     def stages(self):
         return {int(r[0]): r for r in rows(self.save.get('ywp_user_stage'))}
-
 
 # ============================================================================
 # ログイン関数
@@ -610,7 +522,7 @@ def login_email(email, pw, userId=None):
     print(f'  UDkey: {udkey}')
     print('  メール連携中...')
     link_email(udkey, email, pw)
-    print(f'  メール連携成功')
+    print('  メール連携成功')
     print('  サーバー反映待機中... 3秒')
     time.sleep(3)
     print('  ゲームサーバーログイン中...')
@@ -618,27 +530,21 @@ def login_email(email, pw, userId=None):
     c.login(userId=userId)
     return c
 
-# ============================================================================
-# 複数垢対応
-# ============================================================================
 def list_accounts(email, pw):
     print('  [list_accounts] UDkey取得中...')
     udkey = new_udkey()
     print(f'  [list_accounts] UDkey: {udkey}')
     print('  [list_accounts] メール連携中...')
     link_email(udkey, email, pw)
-    print('  [list_accounts] メール連携成功')
-    print('  [list_accounts] サーバー反映待機中... 3秒')
+    print('  メール連携成功 → 反映待機中... 3秒')
     time.sleep(3)
     c = Client(udkey)
     c.init_nhn()
     a = c._active_with_gdkeys()
     accs = c._enum(a)
-    players = [
-        {"userId": x.get("userId"), "playerName": x.get("playerName")}
-        for x in accs if x.get("userId")
-    ]
-    print(f'  [list_accounts] 検出垢数: {len(players)}')
+    players = [{"userId": x.get("userId"), "playerName": x.get("playerName")}
+               for x in accs if x.get("userId")]
+    print(f'  検出垢数: {len(players)}')
     for p in players:
         print(f'    - userId={p["userId"]} name={p["playerName"]}')
     return udkey, players
@@ -647,23 +553,80 @@ def login_email_with_udkey(email, pw, userId, udkey=None):
     if udkey is None:
         print('  [login_email_with_udkey] UDkey取得中...')
         udkey = new_udkey()
-        print('  [login_email_with_udkey] メール連携中...')
+        print('  メール連携中...')
         link_email(udkey, email, pw)
-        print('  [login_email_with_udkey] サーバー反映待機中... 3秒')
+        print('  反映待機中... 3秒')
         time.sleep(3)
-    print(f'  [login_email_with_udkey] userId={userId} でログイン中...')
+    print(f'  userId={userId} でログイン中...')
     c = Client(udkey)
     c.login(userId=userId)
-    print(f'  [login_email_with_udkey] ログイン成功: {c.userId}')
+    print(f'  ログイン成功: {c.userId}')
     return c, udkey
 
 # ============================================================================
-# Cog
+# Cog本体（コマンド含む）
 # ============================================================================
 class YWPAuto(commands.Cog):
-    """API・暗号・Client を提供するCog"""
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    # =============================================================
+    # 🔍 アイテム検索コマンド
+    # =============================================================
+    @app_commands.command(name="アイテム検索", description="アイテム名からIDを検索")
+    @app_commands.describe(keyword="検索するアイテム名（一部でも可）")
+    async def item_search(self, interaction: discord.Interaction, keyword: str):
+        await interaction.response.defer()
+        try:
+            c = login_email(
+                email="avtr948b2m4n6sy@rover.info",
+                pw="WdhKpeLbqX"
+            )
+            items = c.search_item_by_name(keyword)
+            if not items:
+                await interaction.followup.send(f"❌ `{keyword}` に一致するアイテムは見つかりませんでした")
+                return
+            embed = discord.Embed(title=f"🔍 アイテム検索: {keyword}", color=discord.Color.blue())
+            text = ""
+            for it in items[:25]:
+                text += f"**ID:** `{it['id']}` — {it['name']}\n"
+            if len(items) > 25:
+                text += f"\n他 {len(items)-25} 件あります"
+            embed.description = text
+            embed.set_footer(text=f"ヒット数: {len(items)}件")
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            await interaction.followup.send(f"❌ エラー: {e}")
+
+    # =============================================================
+    # 📋 所持アイテムコマンド
+    # =============================================================
+    @app_commands.command(name="所持アイテム", description="自分の所持アイテムを一覧表示")
+    async def my_items(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        try:
+            c = login_email(
+                email="avtr948b2m4n6sy@rover.info",
+                pw="WdhKpeLbqX"
+            )
+            master = c.load_item_master()
+            master_by_id = {it['id']: it for it in master}
+            items = c.items()
+            embed = discord.Embed(title="📋 所持アイテム一覧", color=discord.Color.green())
+            text = ""
+            for item_id, count in sorted(items.items()):
+                info = master_by_id.get(item_id)
+                name = info['name'] if info else f"不明ID:{item_id}"
+                line = f"**{name}** — `{count}`個\n"
+                if len(text) + len(line) > 3500:
+                    text += "\n※ 表示しきれない項目があります"
+                    break
+                text += line
+            embed.description = text
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            await interaction.followup.send(f"❌ エラー: {e}")
+
     @staticmethod
     def login_email(email, pw, userId=None):
         return login_email(email, pw, userId)
@@ -680,5 +643,5 @@ class YWPAuto(commands.Cog):
     def RC():
         return RC
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(YWPAuto(bot))
