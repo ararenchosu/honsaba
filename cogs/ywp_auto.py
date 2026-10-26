@@ -6,15 +6,12 @@ import re
 import time
 import zlib
 from urllib.parse import urljoin, urlparse, parse_qs
-
 from Crypto.Cipher import AES
 import requests
 from discord.ext import commands
-
 # ============================================================================
 # 定数設定
 # ============================================================================
-
 AESK = bytes.fromhex('a865d7e5e2458f8ce1b5ecd087e54594')
 K = b'0bk2kvtFE2'
 APKEY = 'a-zrhgm09pgcgjc1iv9cxvpk3xm9b0ynyo4u00sny6bjq10nrx3up2yrhjnq2lhg'
@@ -22,25 +19,19 @@ SIGNATURE = ('s4X9CoyxGma3kGuAp5woThgvBX3dCi77Slh5RcOo6ybmMTt0J4CGiZwyiCsil7P3'
              'MVgjiVt+kGE1MqvttCXLB+hlOpyTkJp5a78TXthBNVw=')
 GS = 'https://gameserver.yw-p.com'
 L5 = 'https://api.level5-id.com'
-
 MODEL = 'GA00747-UK'
 OSVER = '9'
 APPVER = '4.176.0'
 BATTERY = {'level': 100, 'state': 3, 'technology': 'Li-poly', 'temperature': 261, 'voltage': 4300}
-
 UA = 'Dalvik/2.1.0 (Linux; U; Android %s; %s Build/PI) com.Level5.YWP/%s' % (OSVER, MODEL, APPVER)
 HDR = {'Accept-Encoding': 'identity', 'User-Agent': UA, 'Accept': 'application/json',
        'Content-Type': 'application/json', 'Connection': 'Keep-Alive'}
-
 RC = {0: 'OK', -1: 'IPブロック/復号不可', 20: 'appVerかマスタ版が古い', 30: '署名の不整合',
       32: 'tokenズレ', 37: 'チュートリアル未完了', 101: 'マスタ版が現行と違う', 202: 'BAN'}
-
 # Yポイント（Yポ）はアイテムとして持たれている。IDが違う場合はここを書き換える
 YPOINT_ITEM_ID = 80102
-
 # セーブに含まれる「所持品系」キー（レスポンスから差分取得するのに使う）
 SAVE_PREFIX = 'ywp_user_'
-
 GAME_CONST = [
     {"constType": 5, "mstKey": "blockComboAdjustNumA", "mstValue": "0.051800"},
     {"constType": 5, "mstKey": "blockComboAdjustNumB", "mstValue": "0.995500"},
@@ -67,23 +58,16 @@ GAME_CONST = [
     {"constType": 5, "mstKey": "skillGaugeIncrementSize2", "mstValue": "1.200000"},
     {"constType": 5, "mstKey": "skillGaugeIncrementSize3", "mstValue": "2.400000"},
 ]
-
-
 # ============================================================================
 # 暗号化・復号化関数
 # ============================================================================
-
 def salt20(body):
     return hashlib.sha1(K + hashlib.sha1(K + b' ' + body).digest()).digest()
-
-
 def enc(body):
     pt = salt20(body) + body
     p = 16 - len(pt) % 16
     pt += bytes([p]) * p
     return base64.urlsafe_b64encode(AES.new(AESK, AES.MODE_ECB).encrypt(pt)).decode().rstrip('=')
-
-
 def dec(s):
     s = s.strip()
     ct = base64.urlsafe_b64decode(s + '=' * (-len(s) % 4))
@@ -101,28 +85,21 @@ def dec(s):
         pass
     e = max(rest.rfind(b'}'), rest.rfind(b']'))
     return rest[:e + 1] if e >= 0 else rest
-
-
 def jbody(obj):
     return json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
-
-
 # ============================================================================
 # API通信関数
 # ============================================================================
-
 def post_nhn(name, obj, timeout=30, retry=3):
     for attempt in range(1, retry + 1):
         try:
             r = requests.post('%s/%s' % (GS, name), data=enc(jbody(obj)),
                               headers={**HDR, 'Host': 'gameserver.yw-p.com'}, timeout=timeout)
-
             if r.status_code != 200:
                 if attempt < retry:
                     time.sleep(2 ** attempt)
                     continue
                 return r.status_code, {'resultCode': -1, '_error': f'HTTP{r.status_code}'}
-
             try:
                 out = dec(r.text)
             except Exception:
@@ -130,7 +107,6 @@ def post_nhn(name, obj, timeout=30, retry=3):
                     time.sleep(2 ** attempt)
                     continue
                 return r.status_code, {'resultCode': -1, '_raw': (r.text or '')[:200]}
-
             try:
                 return r.status_code, json.loads(out)
             except Exception:
@@ -138,7 +114,6 @@ def post_nhn(name, obj, timeout=30, retry=3):
                     time.sleep(2 ** attempt)
                     continue
                 return r.status_code, {'_raw': out[:300].decode('utf-8', 'replace')}
-
         except requests.exceptions.Timeout:
             if attempt < retry:
                 time.sleep(3 * attempt)
@@ -149,10 +124,7 @@ def post_nhn(name, obj, timeout=30, retry=3):
                 time.sleep(3 * attempt)
                 continue
             return None, {'resultCode': -1, '_error': 'ConnectionError'}
-
     return None, {'resultCode': -1, '_error': 'Max retries exceeded'}
-
-
 def active(udkey=None, timeout=30):
     p = {'apkey': APKEY, 'device_cd': '%s_%s' % (MODEL, OSVER), 'device_type_cd': 'Android',
          'sign': 'true', 'version': APPVER}
@@ -160,12 +132,8 @@ def active(udkey=None, timeout=30):
         p['udkey'] = udkey
     return requests.get('%s/api/v1/active/' % L5, params=p,
                         headers={'User-Agent': UA}, timeout=timeout).json()
-
-
 def new_udkey():
     return active()['udkey']['value']
-
-
 def create_gdkey(udkey, timeout=30):
     r = requests.get('%s/api/v1/create_gdkey' % L5,
                      params={'apkey': APKEY, 'udkey': udkey,
@@ -175,8 +143,6 @@ def create_gdkey(udkey, timeout=30):
     if not r.get('result'):
         raise RuntimeError('create_gdkey失敗: %s' % r)
     return r['gdkey']['value']
-
-
 def _parse_forms(html):
     out = []
     for fm in re.finditer(r'<form\b[^>]*>(.*?)</form>', html, re.S | re.I):
@@ -190,8 +156,6 @@ def _parse_forms(html):
                 inputs[nm.group(1)] = vm.group(1) if vm else ''
         out.append({'action': am.group(1) if am else '', 'inputs': inputs})
     return out
-
-
 def link_email(udkey, email, pw, timeout=25):
     s = requests.Session()
     s.headers.update({'User-Agent': UA, 'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
@@ -221,14 +185,10 @@ def link_email(udkey, email, pw, timeout=25):
     if not fin.get('result'):
         raise RuntimeError('連携finalize失敗: %s' % fin)
     return fin
-
-
 def rows(s):
     if isinstance(s, str):
         s = json.loads(s) if s.startswith('{') else s
     return [r.split('|') for r in (s or '').split('*') if r] if isinstance(s, str) else (s.get('rows') if isinstance(s, dict) else (s or []))
-
-
 def parse_item_rows(s):
     """'80102|100313*20502|1' 形式を {itemId: 個数} に変換"""
     out = {}
@@ -245,8 +205,6 @@ def parse_item_rows(s):
         except ValueError:
             pass
     return out
-
-
 def parse_user_data(d):
     """ywp_user_data を dict にして返す（str でも dict でもOK）"""
     if isinstance(d, str):
@@ -255,12 +213,9 @@ def parse_user_data(d):
         except Exception:
             return {}
     return d if isinstance(d, dict) else {}
-
-
 # ============================================================================
 # Clientクラス
 # ============================================================================
-
 class Client:
     def __init__(self, udkey):
         self.udkey = udkey
@@ -269,7 +224,6 @@ class Client:
         self.token = '0'
         self.mst = 16897
         self.save = {}
-
     def _active_with_gdkeys(self, retries=6):
         a = active(self.udkey)
         for _ in range(retries):
@@ -280,7 +234,6 @@ class Client:
         if not a.get('gdkeys'):
             raise RuntimeError('gdkeyが無い(このudkeyに紐づくゲームデータが無い)')
         return a
-
     def _enum(self, a):
         gds = a['gdkeys']
         pl = []
@@ -301,7 +254,6 @@ class Client:
             out.append({'idx': i, 'userId': p.get('userId'), 'playerName': p.get('playerName'),
                         'gdkey': g['value'], 'gdsig': g['signature']})
         return out
-
     def init_nhn(self):
         rc, j = post_nhn('init.nhn', {
             'appGuardDeviceId': hashlib.sha256(self.udkey.encode()).hexdigest(),
@@ -312,7 +264,6 @@ class Client:
         if isinstance(v, int) and v > 0:
             self.mst = v
         return j
-
     def login(self, userId=None):
         self.init_nhn()
         a = self._active_with_gdkeys()
@@ -341,12 +292,10 @@ class Client:
         self.gdkey, self.userId, self.token = sel['gdkey'], sel['userId'], j.get('token')
         self.save = j
         return j
-
     def accounts(self):
         self.init_nhn()
         return [{k: v for k, v in a.items() if k != 'gdsig'}
                 for a in self._enum(self._active_with_gdkeys())]
-
     def call(self, name, extra=None):
         if not self.token or self.token == '0':
             raise RuntimeError('先に login() してください')
@@ -361,7 +310,6 @@ class Client:
             self.token = t
         self.merge_save(j)
         return rc, j
-
     def merge_save(self, j):
         """レスポンスに含まれる ywp_user_* を save に反映（所持数を最新に保つ）"""
         if not isinstance(j, dict) or j.get('resultCode') != 0:
@@ -372,7 +320,6 @@ class Client:
                 self.save[k] = v
                 merged = True
         return merged
-
     def currency(self):
         """現在の所持通貨。取得できない項目は None"""
         d = parse_user_data(self.save.get('ywp_user_data'))
@@ -382,43 +329,34 @@ class Client:
             'ypoint': items.get(YPOINT_ITEM_ID),
             'ymoney': int(ymoney) if isinstance(ymoney, (int, float, str)) and str(ymoney).lstrip('-').isdigit() else None,
         }
-
     def master(self, key):
         rc, j = self.call('getMaster.nhn', {'key': key})
         if j.get('resultCode') != 0:
             return {}
         return j
-
     def build_game_end(self, stageId, battleType, start, clear_time_sec=None):
         reqId = start.get('requestId')
         yk = start.get('userYoukaiList') or []
         en = start.get('enemyYoukaiList') or []
-
         # ★ 敵HPからダメージを計算
         total_enemy_hp = sum(e.get('hp', 0) for e in en)
         if total_enemy_hp <= 0:
             total_enemy_hp = 50000
-
         overkill = random.randint(int(total_enemy_hp * 0.05), int(total_enemy_hp * 0.15))
         dmg = total_enemy_hp + overkill
         score = dmg   # スコア = ダメージ
-
         # ★ クリアタイム
         if clear_time_sec is None:
             clear_time_sec = round(random.uniform(8.0, 10.0), 1)
         clear_time_int = int(round(clear_time_sec))
-
         # ★ 消したぷに数
         erase_num = random.randint(20, 80)
-
         # ★ コンボ（消したぷに数と整合）
         combo_min = max(5, erase_num // 5)
         combo_max_val = max(combo_min + 1, min(30, erase_num // 2))
         combo_max = random.randint(combo_min, combo_max_val)
-
         # ★ フィーバーは0固定
         fever_num = 0
-
         # 最大ぷにサイズ（消したぷに数と連動）
         if erase_num < 30:
             erase_size_max = random.randint(100, 106)
@@ -426,10 +364,8 @@ class Client:
             erase_size_max = random.randint(104, 110)
         else:
             erase_size_max = random.randint(108, 112)
-
         # 平均サイズ（最大の90〜100%）
         erase_size_ave = random.uniform(erase_size_max * 0.9, erase_size_max * 1.0)
-
         # 最大同時消し
         if erase_num < 30:
             link_size_max = random.randint(2, 3)
@@ -437,7 +373,6 @@ class Client:
             link_size_max = random.randint(2, 4)
         else:
             link_size_max = random.randint(3, 5)
-
         # 残HP（クリアタイムと連動）
         if clear_time_int <= 8:
             result_hp = random.randint(600, 700)
@@ -445,14 +380,12 @@ class Client:
             result_hp = random.randint(650, 750)
         else:
             result_hp = random.randint(700, 800)
-
         # 妖怪ごとの消した数・サイズ
         user_erase_num = max(1, erase_num // random.randint(1, 2))
         user_erase_size = random.randint(
             int(erase_size_max * 15),
             int(erase_size_max * 20)
         )
-
         # users
         users = []
         for i, y in enumerate(yk):
@@ -470,20 +403,44 @@ class Client:
                 'skillUseNum': 0,
                 'youkaiId': y.get('youkaiId'),
             })
-
         # enemies
         enemies = []
         for i, e in enumerate(en):
+            # ★ そのステージ本来のドロップ候補を取得
+            lot_item_str = e.get('lotItemInfoList') or ''
+            lot_youkai_str = e.get('lotYoukaiInfoList') or ''
+            item_check_key = lot_item_str.split('|')[0] if lot_item_str else ''
+            youkai_check_key = lot_youkai_str.split('|')[0] if lot_youkai_str else ''
+            
+            drop_item_flg = 0
+            drop_item_id = 0
+            drop_treasure_flg = 0
+            drop_treasure_id = 0
+            drop_youkai_flg = 0
+            
+            # ✅ 通常アイテム：候補が存在すれば15%でドロップ
+            if item_check_key and item_check_key != '00000':
+                if random.random() < 0.15:
+                    drop_item_flg = 1
+                    lot_parts = lot_item_str.split('|')
+                    if len(lot_parts) >= 2 and lot_parts[1].isdigit():
+                        drop_item_id = int(lot_parts[1])
+            
+            # ✅ 妖怪ドロップ：候補が存在すれば15%でドロップ
+            if youkai_check_key and youkai_check_key != '00000':
+                if random.random() < 0.15:
+                    drop_youkai_flg = 1
+            
             enemies.append({
                 'deadEndOrder': i + 1,
                 'deadEndType': 0,
-                'dropItemCheckKey': (e.get('lotItemInfoList') or '00000|0').split('|')[0],
-                'dropItemFlg': 0,
-                'dropItemId': 0,
-                'dropTreasureFlg': 0,
-                'dropTreasureId': 0,
-                'dropYoukaiCheckKey': (e.get('lotYoukaiInfoList') or '00000|0').split('|')[0],
-                'dropYoukaiFlg': 0,
+                'dropItemCheckKey': item_check_key or '00000',
+                'dropItemFlg': drop_item_flg,
+                'dropItemId': drop_item_id,
+                'dropTreasureFlg': drop_treasure_flg,
+                'dropTreasureId': drop_treasure_id,
+                'dropYoukaiCheckKey': youkai_check_key or '00000',
+                'dropYoukaiFlg': drop_youkai_flg,
                 'enemyId': e.get('enemyId'),
                 'itemId': 0,
                 'useItemLLarge': 0,
@@ -491,7 +448,6 @@ class Client:
                 'useItemMiddle': 0,
                 'useItemSmall': 0,
             })
-
         return {
             'stageId': stageId,
             'battleType': battleType,
@@ -523,7 +479,6 @@ class Client:
             'themeResultList': [],
             'ywp_mst_game_const': GAME_CONST,
         }
-
     def battle(self, stageId, battleType=None, wait=None):
         if battleType is None:
             battleType = 6 if str(stageId).startswith(('28805', '28904', '29008', '29304')) else 1
@@ -531,59 +486,43 @@ class Client:
                                              'battleCode': '', 'retryFlg': 0})
         if js.get('resultCode') != 0:
             return js.get('resultCode'), js
-
         # ★ プレイ時間をランダム化（8.0〜10.0、0.1秒刻み）
         if wait is None:
             wait = round(random.uniform(8.0, 10.0), 1)
         print(f">>> [battle] プレイ時間 {wait:.1f}秒")
         time.sleep(wait)
-
         ge = self.build_game_end(stageId, battleType, js, clear_time_sec=wait)
         return self.call('gameEnd.nhn', ge)
-
     def info(self):
         d = self.save.get('ywp_user_data')
         if isinstance(d, str):
             d = json.loads(d)
         return d or {}
-
     def youkai(self):
         return [{'id': int(r[0]), 'raw': r} for r in rows(self.save.get('ywp_user_youkai'))]
-
     def items(self):
         return {int(r[0]): int(r[1]) for r in rows(self.save.get('ywp_user_item')) if len(r) >= 2}
-
     def stages(self):
         return {int(r[0]): r for r in rows(self.save.get('ywp_user_stage'))}
-
-
 # ============================================================================
 # ログイン関数
 # ============================================================================
-
 def login_email(email, pw, userId=None):
     print('  UDkey取得中...')
     udkey = new_udkey()
     print(f'  UDkey: {udkey}')
-
     print('  メール連携中...')
     link_email(udkey, email, pw)
     print(f'  メール連携成功')
-
     print('  サーバー反映待機中... 3秒')
     time.sleep(3)
-
     print('  ゲームサーバーログイン中...')
     c = Client(udkey)
     c.login(userId=userId)
-
     return c
-
-
 # ============================================================================
 # 複数垢対応
 # ============================================================================
-
 def list_accounts(email, pw):
     """
     メアド＋パスワードでログインし、紐づく全垢の一覧を返す。
@@ -592,19 +531,15 @@ def list_accounts(email, pw):
     print('  [list_accounts] UDkey取得中...')
     udkey = new_udkey()
     print(f'  [list_accounts] UDkey: {udkey}')
-
     print('  [list_accounts] メール連携中...')
     link_email(udkey, email, pw)
     print('  [list_accounts] メール連携成功')
-
     print('  [list_accounts] サーバー反映待機中... 3秒')
     time.sleep(3)
-
     c = Client(udkey)
     c.init_nhn()
     a = c._active_with_gdkeys()
     accs = c._enum(a)
-
     players = [
         {"userId": x.get("userId"), "playerName": x.get("playerName")}
         for x in accs if x.get("userId")
@@ -613,8 +548,6 @@ def list_accounts(email, pw):
     for p in players:
         print(f'    - userId={p["userId"]} name={p["playerName"]}')
     return udkey, players
-
-
 def login_email_with_udkey(email, pw, userId, udkey=None):
     """
     udkey を指定すれば link_email をスキップ（2回目以降の垢ログインが高速）
@@ -627,44 +560,32 @@ def login_email_with_udkey(email, pw, userId, udkey=None):
         link_email(udkey, email, pw)
         print('  [login_email_with_udkey] サーバー反映待機中... 3秒')
         time.sleep(3)
-
     print(f'  [login_email_with_udkey] userId={userId} でログイン中...')
     c = Client(udkey)
     c.login(userId=userId)
     print(f'  [login_email_with_udkey] ログイン成功: {c.userId}')
     return c, udkey
-
-
 # ============================================================================
 # Cog
 # ============================================================================
-
 class YWPAuto(commands.Cog):
     """API・暗号・Client を提供するCog"""
-
     def __init__(self, bot):
         self.bot = bot
-
     @staticmethod
     def login_email(email, pw, userId=None):
         return login_email(email, pw, userId)
-
     @staticmethod
     def list_accounts(email, pw):
         return list_accounts(email, pw)
-
     @staticmethod
     def login_email_with_udkey(email, pw, userId, udkey=None):
         return login_email_with_udkey(email, pw, userId, udkey)
-
     @staticmethod
     def Client(udkey):
         return Client(udkey)
-
     @staticmethod
     def RC():
         return RC
-
-
 async def setup(bot):
     await bot.add_cog(YWPAuto(bot))
