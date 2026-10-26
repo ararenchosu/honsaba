@@ -1179,77 +1179,198 @@ class ResumeView(ui.View):
 # ============================================================
 # DM通知
 # ============================================================
-async def send_locked_dm(bot, user_id, stage_id, player_name=None, streak=0):
-    try:
-        user = await bot.fetch_user(user_id)
-    except Exception:
-        return
-    embed = discord.Embed(
-        title="⛔ ステージに入れないため停止しました",
-        description=(
-            f"**ステージ**: `{stage_id}`" + chr(10)
-            + f"**アカウント**: {player_name or '不明'}" + chr(10)
-            + f"**症状**: `rc=5`（条件未達）が {streak} 周連続" + chr(10) + chr(10)
-            + "【よくある原因】" + chr(10)
-            + "・**操作中の垢が違う**（👥 アカウント で切替）" + chr(10)
-            + "・そのステージの解放条件を満たしていない" + chr(10)
-            + "・イベントが終了している" + chr(10)
-        ),
-        color=0xff4444,
-        timestamp=datetime.now(JST)
-    )
-    try:
-        await user.send(embed=embed)
-    except Exception:
-        pass
+class ResumeView(ui.View):
+    def __init__(self, user_id, loop_key, stage_id, count, current,
+                 request_delay, cooldown, end_at=None):
+        super().__init__(timeout=None)
+        self.user_id = user_id
+        self.loop_key = loop_key
+        self.stage_id = stage_id
+        self.count = count
+        self.current = current
+        self.request_delay = request_delay
+        self.cooldown = cooldown
+        self.end_at = end_at
 
-
-async def send_hitodama_dm(bot, user_id, loop_key, stage_id, count, current,
-                           request_delay, cooldown, current_hitodama, end_at=None,
-                           buy_info=None):
-    try:
-        user = await bot.fetch_user(user_id)
-    except Exception:
-        return
-    acc = get_active_account(user_id)
-    ymoney = "?"
-    detail = None
-    if acc:
+    # =============================================================
+    # ✅ DMログ送信 共通関数
+    # =============================================================
+    async def _send_dm_log(self, bot, content, embed=None):
+        """ユーザーにDMを送信：失敗しても周回は継続"""
         try:
-            client = build_client_from_account(acc)
+            user = await bot.fetch_user(self.user_id)
+            if user:
+                await user.send(content=content, embed=embed)
+        except Exception as e:
+            print(f"⚠️ DM送信失敗（継続します）: {e}")
+
+    @ui.button(label="▶️ 周回再開", style=discord.ButtonStyle.success, emoji="▶️", custom_id="hitodama_resume:resume")
+    async def resume(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ あなたの通知ではありません。", ephemeral=True)
+        if not await safe_defer(interaction):
+            return
+
+        acc = get_active_account(self.user_id)
+        if not acc:
+            return await safe_reply(interaction, content="❌ セッションがありません。", ephemeral=True)
+
+        client = build_client_from_account(acc)
+        try:
             await asyncio.to_thread(client.login, acc["userId"])
-            ymoney = get_ymoney(client)
-            detail = get_hitodama_detail(client)
-        except Exception:
-            pass
-    if detail:
-        hitodama_line = f"{detail['total']}（購入分 {detail['paid']} / 無料 {detail['free']}）"
-    else:
-        hitodama_line = str(current_hitodama)
-    embed = discord.Embed(
-        title="⚠️ 人魂自動購入失敗",
-        description=(
-            f"**現在の人魂**: {hitodama_line}\n"
-            f"**YM**: {ymoney}\n"
-            f"**ステージ**: `{stage_id}`\n"
-            f"**進捗**: {current} / {count if count < 999999 else '日時まで'}\n\n"
-            f"【サーバーの応答】\n{describe_buy_failure(buy_info)}\n\n"
-            f"【対応】\nぷにぷに側で人魂を補充して「▶️ 周回再開」を押してください"
-        ),
-        color=0xff4444,
-        timestamp=datetime.now(JST)
-    )
-    view = ResumeView(
-        user_id=user_id, loop_key=loop_key, stage_id=stage_id,
-        count=count, current=current,
-        request_delay=request_delay, cooldown=cooldown, end_at=end_at
-    )
-    try:
-        await user.send(embed=embed, view=view)
-    except discord.Forbidden:
-        pass
-    except Exception:
-        pass
+            update_account_tokens(self.user_id, client)
+        except Exception as e:
+            return await safe_reply(interaction, content=f"❌ ログイン失敗: `{str(e)[:200]}`", ephemeral=True)
+
+        current_hitodama = get_hitodama(client)
+        if current_hitodama < HITODAMA_RESUME_MIN:
+            return await safe_reply(
+                interaction,
+                content=f"❌ 人魂がまだ足りません。\n**現在**: {current_hitodama} / 必要: {HITODAMA_RESUME_MIN}",
+                ephemeral=True
+            )
+
+        loops = load_loops()
+        if self.loop_key in loops:
+            loops[self.loop_key]["status"] = "running"
+            await save_loops_async(loops)
+
+        remaining = self.count - self.current
+        if remaining <= 0:
+            return await safe_reply(interaction, content="✅ 周回は既に完了しています。", ephemeral=True)
+
+        # ===== 開始通知をDMに送信 =====
+        start_embed = discord.Embed(
+            title="▶️ 周回を再開します",
+            description=(
+                f"**人魂**: {current_hitodama}\n"
+                f"**残り回数**: {remaining}回\n"
+                f"**ステージ**: `{self.stage_id}`\n"
+                f"**間隔**: {self.request_delay}秒 ± {self.cooldown}秒"
+            ),
+            color=0x00ff88
+        )
+        await self._send_dm_log(interaction.client, "🔄 周回開始", embed=start_embed)
+
+        # ===== バックグラウンド周回タスク（DMログ付き） =====
+        async def run_with_dm_logging():
+            bot = interaction.client
+            success = 0
+            fail = 0
+            before_items = None
+
+            try:
+                # 開始時の所持アイテムを記録
+                try:
+                    before_items = client.items()
+                except Exception:
+                    before_items = {}
+
+                for idx in range(self.current + 1, self.count + 1):
+                    # 停止チェック
+                    loops = load_loops()
+                    if self.loop_key not in loops or loops[self.loop_key].get("status") != "running":
+                        await self._send_dm_log(bot, "🛑 周回が停止されました")
+                        return
+
+                    # 実行
+                    try:
+                        wait_time = round(random.uniform(
+                            self.request_delay - self.cooldown,
+                            self.request_delay + self.cooldown
+                        ), 1)
+                        rc, result = client.battle(self.stage_id, wait=wait_time)
+
+                        if rc == 0:
+                            success += 1
+                            # 5回ごとに進捗DM
+                            if idx % 5 == 0 or idx == self.count:
+                                progress_embed = discord.Embed(
+                                    title="🔄 周回進捗",
+                                    description=(
+                                        f"**{idx}/{self.count}** 完了\n"
+                                        f"✅ 成功: {success}回 | ❌ 失敗: {fail}回\n"
+                                        f"⏱ 前回: {wait_time}秒"
+                                    ),
+                                    color=0x2563eb
+                                )
+                                await self._send_dm_log(bot, embed=progress_embed)
+                        else:
+                            fail += 1
+                            await self._send_dm_log(
+                                bot,
+                                f"⚠️ [{idx}/{self.count}] エラーコード: `{rc}`"
+                            )
+
+                    except Exception as e:
+                        fail += 1
+                        await self._send_dm_log(
+                            bot,
+                            f"❌ [{idx}/{self.count}] 例外: `{str(e)[:100]}`"
+                        )
+
+                    # 待機
+                    await asyncio.sleep(1)
+
+                # ===== 完了時 =====
+                after_items = client.items()
+                gained = {}
+                all_ids = set(before_items.keys()) | set(after_items.keys())
+                for item_id in all_ids:
+                    diff = after_items.get(item_id, 0) - before_items.get(item_id, 0)
+                    if diff > 0:
+                        gained[item_id] = diff
+
+                finish_embed = discord.Embed(
+                    title="✅ 周回 全行程完了",
+                    description=(
+                        f"**成功**: {success}回\n"
+                        f"**失敗**: {fail}回\n"
+                        f"**ステージ**: `{self.stage_id}`"
+                    ),
+                    color=0x00ff88
+                )
+                if gained:
+                    gained_text = ""
+                    for item_id, num in sorted(gained.items()):
+                        name = ITEM_NAME_MAP.get(item_id, f"ID:{item_id}")
+                        gained_text += f"**{name}** +{num}個\n"
+                    finish_embed.add_field(name="📦 獲得アイテム", value=gained_text, inline=False)
+
+                await self._send_dm_log(bot, embed=finish_embed)
+
+            except Exception as task_e:
+                await self._send_dm_log(bot, f"❌ 周回異常終了: `{str(task_e)[:200]}`")
+
+        asyncio.create_task(run_with_dm_logging())
+
+        # ボタンを押したチャンネル側は簡略表示
+        await safe_reply(interaction, embed=discord.Embed(
+            title="▶️ 周回を再開しました",
+            description="進行状況は**DM**でお届けします ✅",
+            color=0x00ff88
+        ), ephemeral=False)
+
+    @ui.button(label="🛑 完全停止", style=discord.ButtonStyle.danger, emoji="🛑", custom_id="hitodama_resume:stop")
+    async def stop(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ あなたの通知ではありません。", ephemeral=True)
+        if not await safe_defer(interaction):
+            return
+
+        loops = load_loops()
+        if self.loop_key in loops:
+            del loops[self.loop_key]
+            await save_loops_async(loops)
+            # 停止通知をDMにも送る
+            try:
+                user = await interaction.client.fetch_user(self.user_id)
+                if user:
+                    await user.send("🛑 周回を完全停止しました")
+            except Exception:
+                pass
+
+        await safe_reply(interaction, content="🛑 周回を完全停止しました。", ephemeral=True)
 # ============================================================
 # モーダル：ログイン
 # ============================================================
