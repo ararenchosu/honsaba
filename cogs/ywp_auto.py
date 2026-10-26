@@ -224,6 +224,9 @@ class Client:
         self.token = '0'
         self.mst = 16897
         self.save = {}
+        # ✅ マスターデータキャッシュ
+        self._item_master_cache = None
+
     def _active_with_gdkeys(self, retries=6):
         a = active(self.udkey)
         for _ in range(retries):
@@ -234,6 +237,7 @@ class Client:
         if not a.get('gdkeys'):
             raise RuntimeError('gdkeyが無い(このudkeyに紐づくゲームデータが無い)')
         return a
+
     def _enum(self, a):
         gds = a['gdkeys']
         pl = []
@@ -254,6 +258,7 @@ class Client:
             out.append({'idx': i, 'userId': p.get('userId'), 'playerName': p.get('playerName'),
                         'gdkey': g['value'], 'gdsig': g['signature']})
         return out
+
     def init_nhn(self):
         rc, j = post_nhn('init.nhn', {
             'appGuardDeviceId': hashlib.sha256(self.udkey.encode()).hexdigest(),
@@ -264,6 +269,7 @@ class Client:
         if isinstance(v, int) and v > 0:
             self.mst = v
         return j
+
     def login(self, userId=None):
         self.init_nhn()
         a = self._active_with_gdkeys()
@@ -292,10 +298,12 @@ class Client:
         self.gdkey, self.userId, self.token = sel['gdkey'], sel['userId'], j.get('token')
         self.save = j
         return j
+
     def accounts(self):
         self.init_nhn()
         return [{k: v for k, v in a.items() if k != 'gdsig'}
                 for a in self._enum(self._active_with_gdkeys())]
+
     def call(self, name, extra=None):
         if not self.token or self.token == '0':
             raise RuntimeError('先に login() してください')
@@ -310,8 +318,8 @@ class Client:
             self.token = t
         self.merge_save(j)
         return rc, j
+
     def merge_save(self, j):
-        """レスポンスに含まれる ywp_user_* を save に反映（所持数を最新に保つ）"""
         if not isinstance(j, dict) or j.get('resultCode') != 0:
             return False
         merged = False
@@ -320,8 +328,8 @@ class Client:
                 self.save[k] = v
                 merged = True
         return merged
+
     def currency(self):
-        """現在の所持通貨。取得できない項目は None"""
         d = parse_user_data(self.save.get('ywp_user_data'))
         items = parse_item_rows(self.save.get('ywp_user_item'))
         ymoney = d.get('ymoney')
@@ -329,64 +337,122 @@ class Client:
             'ypoint': items.get(YPOINT_ITEM_ID),
             'ymoney': int(ymoney) if isinstance(ymoney, (int, float, str)) and str(ymoney).lstrip('-').isdigit() else None,
         }
+
+    # =============================================================
+    # ✅ 【新規追加】アイテムマスター取得・検索機能
+    # =============================================================
+    def load_item_master(self, force_reload=False):
+        """アイテムマスターデータを読み込み（キャッシュがあれば再利用）"""
+        if self._item_master_cache is not None and not force_reload:
+            return self._item_master_cache
+
+        rc, j = self.call('getMaster.nhn', {'key': 'item'})
+        if j.get('resultCode') != 0:
+            print(f"⚠️ マスター取得失敗: {j}")
+            return []
+
+        master_data = j.get('masterItemList') or []
+        # 名前・IDで検索しやすいように整形
+        self._item_master_cache = [
+            {
+                'id': item.get('id'),
+                'name': item.get('name'),
+                'description': item.get('description', ''),
+                'rarity': item.get('rarity', 0),
+                'type': item.get('itemType', 0)
+            }
+            for item in master_data
+        ]
+        print(f"✅ アイテムマスター読み込み完了: {len(self._item_master_cache)}件")
+        return self._item_master_cache
+
+    def search_item_by_name(self, keyword):
+        """アイテム名（部分一致）で検索 → 候補一覧を返す"""
+        master = self.load_item_master()
+        kw = keyword.lower()
+        result = [
+            item for item in master
+            if kw in (item['name'] or '').lower()
+        ]
+        return result
+
+    def get_item_id_by_name(self, keyword):
+        """アイテム名で検索 → 最初にヒットしたIDを返す（複数候補は表示）"""
+        items = self.search_item_by_name(keyword)
+        if not items:
+            print(f"❌ '{keyword}' に一致するアイテムが見つかりません")
+            return None
+        if len(items) > 1:
+            print(f"⚠️ {len(items)}件ヒットしました:")
+            for it in items:
+                print(f"   ID: {it['id']} | {it['name']}")
+            return None
+        print(f"✅ 一致: ID={items[0]['id']} | {items[0]['name']}")
+        return items[0]['id']
+
+    def show_my_items(self):
+        """所持アイテムを名前付きで一覧表示"""
+        master = self.load_item_master()
+        master_by_id = {it['id']: it for it in master}
+        items = self.items()
+        print("=== 所持アイテム一覧 ===")
+        for item_id, count in sorted(items.items()):
+            info = master_by_id.get(item_id)
+            name = info['name'] if info else f"不明{item_id}"
+            print(f"ID: {item_id:>6} | {name} × {count}")
+        return items
+
+    # =============================================================
+    # 既存メソッド
+    # =============================================================
     def master(self, key):
         rc, j = self.call('getMaster.nhn', {'key': key})
         if j.get('resultCode') != 0:
             return {}
         return j
+
     def build_game_end(self, stageId, battleType, start, clear_time_sec=None):
         reqId = start.get('requestId')
         yk = start.get('userYoukaiList') or []
         en = start.get('enemyYoukaiList') or []
-        # ★ 敵HPからダメージを計算
         total_enemy_hp = sum(e.get('hp', 0) for e in en)
         if total_enemy_hp <= 0:
             total_enemy_hp = 50000
         overkill = random.randint(int(total_enemy_hp * 0.05), int(total_enemy_hp * 0.15))
         dmg = total_enemy_hp + overkill
-        score = dmg   # スコア = ダメージ
-        # ★ クリアタイム
+        score = dmg
         if clear_time_sec is None:
             clear_time_sec = round(random.uniform(8.0, 10.0), 1)
         clear_time_int = int(round(clear_time_sec))
-        # ★ 消したぷに数
         erase_num = random.randint(20, 80)
-        # ★ コンボ（消したぷに数と整合）
         combo_min = max(5, erase_num // 5)
         combo_max_val = max(combo_min + 1, min(30, erase_num // 2))
         combo_max = random.randint(combo_min, combo_max_val)
-        # ★ フィーバーは0固定
         fever_num = 0
-        # 最大ぷにサイズ（消したぷに数と連動）
         if erase_num < 30:
             erase_size_max = random.randint(100, 106)
         elif erase_num < 60:
             erase_size_max = random.randint(104, 110)
         else:
             erase_size_max = random.randint(108, 112)
-        # 平均サイズ（最大の90〜100%）
         erase_size_ave = random.uniform(erase_size_max * 0.9, erase_size_max * 1.0)
-        # 最大同時消し
         if erase_num < 30:
             link_size_max = random.randint(2, 3)
         elif erase_num < 50:
             link_size_max = random.randint(2, 4)
         else:
             link_size_max = random.randint(3, 5)
-        # 残HP（クリアタイムと連動）
         if clear_time_int <= 8:
             result_hp = random.randint(600, 700)
         elif clear_time_int == 9:
             result_hp = random.randint(650, 750)
         else:
             result_hp = random.randint(700, 800)
-        # 妖怪ごとの消した数・サイズ
         user_erase_num = max(1, erase_num // random.randint(1, 2))
         user_erase_size = random.randint(
             int(erase_size_max * 15),
             int(erase_size_max * 20)
         )
-        # users
         users = []
         for i, y in enumerate(yk):
             is_first = (i == 0)
@@ -403,10 +469,8 @@ class Client:
                 'skillUseNum': 0,
                 'youkaiId': y.get('youkaiId'),
             })
-        # enemies
         enemies = []
         for i, e in enumerate(en):
-            # ★ そのステージ本来のドロップ候補を取得
             lot_item_str = e.get('lotItemInfoList') or ''
             lot_youkai_str = e.get('lotYoukaiInfoList') or ''
             item_check_key = lot_item_str.split('|')[0] if lot_item_str else ''
@@ -418,7 +482,6 @@ class Client:
             drop_treasure_id = 0
             drop_youkai_flg = 0
             
-            # ✅ 通常アイテム：候補が存在すれば15%でドロップ
             if item_check_key and item_check_key != '00000':
                 if random.random() < 0.15:
                     drop_item_flg = 1
@@ -426,7 +489,6 @@ class Client:
                     if len(lot_parts) >= 2 and lot_parts[1].isdigit():
                         drop_item_id = int(lot_parts[1])
             
-            # ✅ 妖怪ドロップ：候補が存在すれば15%でドロップ
             if youkai_check_key and youkai_check_key != '00000':
                 if random.random() < 0.15:
                     drop_youkai_flg = 1
@@ -479,6 +541,7 @@ class Client:
             'themeResultList': [],
             'ywp_mst_game_const': GAME_CONST,
         }
+
     def battle(self, stageId, battleType=None, wait=None):
         if battleType is None:
             battleType = 6 if str(stageId).startswith(('28805', '28904', '29008', '29304')) else 1
@@ -486,24 +549,29 @@ class Client:
                                              'battleCode': '', 'retryFlg': 0})
         if js.get('resultCode') != 0:
             return js.get('resultCode'), js
-        # ★ プレイ時間をランダム化（8.0〜10.0、0.1秒刻み）
         if wait is None:
             wait = round(random.uniform(8.0, 10.0), 1)
         print(f">>> [battle] プレイ時間 {wait:.1f}秒")
         time.sleep(wait)
         ge = self.build_game_end(stageId, battleType, js, clear_time_sec=wait)
         return self.call('gameEnd.nhn', ge)
+
     def info(self):
         d = self.save.get('ywp_user_data')
         if isinstance(d, str):
             d = json.loads(d)
         return d or {}
+
     def youkai(self):
         return [{'id': int(r[0]), 'raw': r} for r in rows(self.save.get('ywp_user_youkai'))]
+
     def items(self):
         return {int(r[0]): int(r[1]) for r in rows(self.save.get('ywp_user_item')) if len(r) >= 2}
+
     def stages(self):
         return {int(r[0]): r for r in rows(self.save.get('ywp_user_stage'))}
+
+
 # ============================================================================
 # ログイン関数
 # ============================================================================
@@ -520,14 +588,11 @@ def login_email(email, pw, userId=None):
     c = Client(udkey)
     c.login(userId=userId)
     return c
+
 # ============================================================================
 # 複数垢対応
 # ============================================================================
 def list_accounts(email, pw):
-    """
-    メアド＋パスワードでログインし、紐づく全垢の一覧を返す。
-    戻り値: (udkey, [{"userId": "...", "playerName": "..."}, ...])
-    """
     print('  [list_accounts] UDkey取得中...')
     udkey = new_udkey()
     print(f'  [list_accounts] UDkey: {udkey}')
@@ -548,11 +613,8 @@ def list_accounts(email, pw):
     for p in players:
         print(f'    - userId={p["userId"]} name={p["playerName"]}')
     return udkey, players
+
 def login_email_with_udkey(email, pw, userId, udkey=None):
-    """
-    udkey を指定すれば link_email をスキップ（2回目以降の垢ログインが高速）
-    戻り値: (Client, udkey)
-    """
     if udkey is None:
         print('  [login_email_with_udkey] UDkey取得中...')
         udkey = new_udkey()
@@ -565,6 +627,7 @@ def login_email_with_udkey(email, pw, userId, udkey=None):
     c.login(userId=userId)
     print(f'  [login_email_with_udkey] ログイン成功: {c.userId}')
     return c, udkey
+
 # ============================================================================
 # Cog
 # ============================================================================
@@ -587,5 +650,6 @@ class YWPAuto(commands.Cog):
     @staticmethod
     def RC():
         return RC
+
 async def setup(bot):
     await bot.add_cog(YWPAuto(bot))
