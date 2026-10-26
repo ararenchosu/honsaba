@@ -225,7 +225,7 @@ class Client:
         self.gdkey = None
         self.userId = None
         self.token = '0'
-        self.mst = 16897
+        self.mst = 16897  # 初期値 → initで自動更新
         self.save = {}
         self._item_master_cache = None
 
@@ -267,8 +267,10 @@ class Client:
             'appVer': APPVER, 'deviceId': self.udkey, 'level5UserId': '0',
             'mstVersionVer': self.mst, 'osType': 2, 'signature': SIGNATURE,
             'userId': '0', 'ywpToken': '0'})
+        # ✅ マスターバージョン自動更新
         v = j.get('mstVersionMaster')
-        if isinstance(v, int) and v > 0:
+        if isinstance(v, int) and v > 0 and v != self.mst:
+            print(f"🔄 マスターバージョン更新: {self.mst} → {v}")
             self.mst = v
         return j
 
@@ -340,24 +342,37 @@ class Client:
         }
 
     # =============================================================
-    # アイテムマスター検索機能
+    # ✅ アイテムマスター取得（再試行付き）
     # =============================================================
     def load_item_master(self, force_reload=False):
         if self._item_master_cache is not None and not force_reload:
             return self._item_master_cache
-        rc, j = self.call('getMaster.nhn', {'key': 'item'})
-        if j.get('resultCode') != 0:
+
+        for attempt in range(3):  # 最大3回再試行
+            rc, j = self.call('getMaster.nhn', {'key': 'item'})
+            if j.get('resultCode') == 0:
+                master_data = j.get('masterItemList') or []
+                self._item_master_cache = [
+                    {'id': item.get('id'), 'name': item.get('name'),
+                     'description': item.get('description', ''), 'rarity': item.get('rarity', 0),
+                     'type': item.get('itemType', 0)}
+                    for item in master_data
+                ]
+                print(f"✅ アイテムマスター読み込み完了: {len(self._item_master_cache)}件")
+                return self._item_master_cache
+
+            # バージョン不一致 → initして更新してから再試行
+            if j.get('resultCode') in (3, 20, 101):
+                print(f"⚠️ マスター不一致 → 更新して再試行 {attempt+1}/3")
+                self.init_nhn()
+                time.sleep(1)
+                continue
+
             print(f"⚠️ マスター取得失敗: {j}")
-            return []
-        master_data = j.get('masterItemList') or []
-        self._item_master_cache = [
-            {'id': item.get('id'), 'name': item.get('name'),
-             'description': item.get('description', ''), 'rarity': item.get('rarity', 0),
-             'type': item.get('itemType', 0)}
-            for item in master_data
-        ]
-        print(f"✅ アイテムマスター読み込み完了: {len(self._item_master_cache)}件")
-        return self._item_master_cache
+            time.sleep(1)
+
+        print("❌ マスター取得 全試行失敗")
+        return []
 
     def search_item_by_name(self, keyword):
         master = self.load_item_master()
@@ -564,15 +579,12 @@ def login_email_with_udkey(email, pw, userId, udkey=None):
     return c, udkey
 
 # ============================================================================
-# Cog本体（コマンド含む）
+# Cog本体
 # ============================================================================
 class YWPAuto(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # =============================================================
-    # 🔍 アイテム検索コマンド
-    # =============================================================
     @app_commands.command(name="アイテム検索", description="アイテム名からIDを検索")
     @app_commands.describe(keyword="検索するアイテム名（一部でも可）")
     async def item_search(self, interaction: discord.Interaction, keyword: str):
@@ -598,9 +610,6 @@ class YWPAuto(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ エラー: {e}")
 
-    # =============================================================
-    # 📋 所持アイテムコマンド
-    # =============================================================
     @app_commands.command(name="所持アイテム", description="自分の所持アイテムを一覧表示")
     async def my_items(self, interaction: discord.Interaction):
         await interaction.response.defer()
