@@ -1,5 +1,6 @@
 import os
 import re
+import random
 import asyncio
 import discord
 from discord import app_commands, ui
@@ -270,6 +271,7 @@ class MusicPlayerCog(commands.Cog):
                 await self.update_panel()
             else:
                 await interaction.response.send_message("❌ 再生する曲がありません", ephemeral=True)
+
         @ui.button(label="⏸ 一時停止", style=discord.ButtonStyle.secondary, row=1)
         async def pause_btn(self, interaction, btn):
             if interaction.user.id != self.author.id or not interaction.guild.voice_client:
@@ -277,6 +279,17 @@ class MusicPlayerCog(commands.Cog):
             if interaction.guild.voice_client.is_playing():
                 interaction.guild.voice_client.pause()
                 await interaction.response.send_message("⏸ 一時停止", ephemeral=True)
+
+        @ui.button(label="🔀 シャッフル", style=discord.ButtonStyle.secondary, row=1)
+        async def shuffle_btn(self, interaction, btn):
+            if interaction.user.id != self.author.id:
+                return await interaction.response.send_message("❌ 権限なし", ephemeral=True)
+            if len(self.cog.music_list) < 2:
+                return await interaction.response.send_message("❌ シャッフルする曲が2曲以上必要です", ephemeral=True)
+            random.shuffle(self.cog.music_list)
+            await interaction.response.send_message(f"🔀 シャッフル完了！（{len(self.cog.music_list)}曲）", ephemeral=True)
+            await self.update_panel()
+
         @ui.button(label="⏯ 再開", style=discord.ButtonStyle.secondary, row=2)
         async def res_btn(self, interaction, btn):
             if interaction.user.id != self.author.id or not interaction.guild.voice_client:
@@ -284,6 +297,7 @@ class MusicPlayerCog(commands.Cog):
             if interaction.guild.voice_client.is_paused():
                 interaction.guild.voice_client.resume()
                 await interaction.response.send_message("⏯ 再開", ephemeral=True)
+
         @ui.button(label="⏭ スキップ", style=discord.ButtonStyle.primary, row=2)
         async def skip_btn(self, interaction, btn):
             if interaction.user.id != self.author.id or not interaction.guild.voice_client:
@@ -294,6 +308,7 @@ class MusicPlayerCog(commands.Cog):
                 await self.update_panel()
             else:
                 await interaction.response.send_message("❌ スキップする曲がありません", ephemeral=True)
+
         @ui.button(label="⏹ 停止/切断", style=discord.ButtonStyle.danger, row=2)
         async def stop_btn(self, interaction, btn):
             if interaction.user.id != self.author.id or not interaction.guild.voice_client:
