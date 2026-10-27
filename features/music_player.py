@@ -209,7 +209,8 @@ class MusicPlayerCog(commands.Cog):
 
         # サブパネル更新
         await self.update_sub_panel(guild_id, channel)
-        async def update_sub_panel(self, guild_id, channel=None):
+
+    async def update_sub_panel(self, guild_id, channel=None):
         """サブパネルを自動更新"""
         state = self.get_state(guild_id)
         if not state.sub_panel_message:
