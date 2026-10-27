@@ -32,6 +32,13 @@ import features.ranking_panel as ranking_panel
 import features.elevator_panel as elevator_panel
 import features.mines_panel as mines_panel
 from core.common import is_owner
+# ===== 音楽プレイヤー用設定 =====
+try:
+    from core.config import Config
+    MUSIC_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️ 音楽設定読み込みエラー: {e}")
+    MUSIC_AVAILABLE = False
 # ===== ウェブサーバーインポート =====
 try:
     from web.app import app as flask_app
@@ -118,8 +125,11 @@ class YWPBot(commands.Bot):
             "cogs.ywp_commands",
             "cogs.ywp_stages",
             "cogs.ywp_panel",
-            "cogs.auto_loop",  # ✅ 自動周回 追加
+            "cogs.auto_loop",  # ✅ 自動周回
         ]
+        # ✅ 音楽プレイヤーを追加
+        if MUSIC_AVAILABLE:
+            cogs.append("cogs.music_player")
         for cog in cogs:
             try:
                 await self.load_extension(cog)
@@ -201,7 +211,7 @@ class YWPBot(commands.Bot):
         await login_bonus_setup(tree, self); print("  ✅ login_bonus")
         await slots_setup(tree, self); print("  ✅ slots_panel")
         await blackjack_setup(tree, self); print("  ✅ blackjack_panel")
-        await highlow_setup(tree, self); print("  ✅ highlow_panel")
+        await highlow_setup(tree, self); print("  ✅ highlow_setup")
         await point_admin_setup(tree, self); print("  ✅ point_admin_panel")
         await embed_sender.setup(tree); print("  ✅ embed_sender")
         await clear_messages.setup(tree); print("  ✅ clear_messages")
@@ -309,7 +319,7 @@ async def on_close():
 # 🚀 並行起動
 # ==================================================
 async def main():
-    tasks = [bot_main.start(os.getenv("DISCORD_TOKEN"))]
+    tasks = [bot_main.start(os.getenv("DISCORD_BOT_TOKEN"))]
     if TOKEN_SUB and bot_sub:
         tasks.append(bot_sub.start(TOKEN_SUB))
     await asyncio.gather(*tasks)
