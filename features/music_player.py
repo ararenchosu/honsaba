@@ -1,4 +1,5 @@
 import os
+import asyncio
 import discord
 import yt_dlp
 from discord import app_commands, ui
@@ -29,12 +30,35 @@ class MusicPlayerCog(commands.Cog):
         return response.get('items', [])
 
     async def download_audio(self, url):
+        # ✅ Bot判定回避のため設定を強化
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': f'{MUSIC_PATH}/%(id)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
+            # 人間らしいブラウザとして偽装
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                'Referer': 'https://www.youtube.com/',
+            },
+            # 最新のプレイヤークライアントを使用
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['web'],
+                    'skip': ['dash', 'hls'],
+                }
+            },
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
+            'socket_timeout': 30,
+            # 必要に応じてCookieファイルを使う場合はここに記述
+            # 'cookiefile': './cookies.txt',
         }
+
+        # 短時間の連続アクセスを避けるため少し待機
+        await asyncio.sleep(1.5)
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             thumb = info.get('thumbnail', '')
@@ -112,7 +136,6 @@ class MusicPlayerCog(commands.Cog):
             self.cog = cog
             self.results = results
             self.parent_view = parent_view
-            # ボタンを動的に生成
             for idx, item in enumerate(results):
                 snippet = item['snippet']
                 video_id = item['id']['videoId']
@@ -123,7 +146,6 @@ class MusicPlayerCog(commands.Cog):
                     style=discord.ButtonStyle.primary,
                     custom_id=f"add_{video_id}"
                 )
-                # callbackを直接設定 → この書き方でエラーが出ない
                 btn.callback = self._make_callback(video_id, title, thumb)
                 self.add_item(btn)
 
@@ -141,7 +163,7 @@ class MusicPlayerCog(commands.Cog):
                     await msg.edit(content="", embed=embed)
                     await self.parent_view.update_panel()
                 except Exception as e:
-                    await msg.edit(content=f"❌ 追加失敗: {str(e)[:100]}")
+                    await msg.edit(content=f"❌ 追加失敗: `{str(e)[:150]}`")
             return callback
 
     # ========== メインパネル ==========
