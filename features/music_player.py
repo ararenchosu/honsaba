@@ -1,10 +1,10 @@
 import os
 import asyncio
 import discord
-import yt_dlp
 from discord import app_commands, ui
 from discord.ext import commands
 from googleapiclient.discovery import build
+import yt_dlp
 
 # ===== 環境変数から直接取得 =====
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -18,7 +18,7 @@ class MusicPlayerCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.music_list = []
-        self.current_player = None
+        self.current_title = None
         self.is_playing = False
 
     async def youtube_search(self, query):
@@ -29,20 +29,16 @@ class MusicPlayerCog(commands.Cog):
         response = request.execute()
         return response.get('items', [])
 
-    async def download_audio(self, url):
-        # ✅ Bot判定回避のため設定を強化
+    async def get_stream_url(self, url):
+        """ダウンロードせずに直接再生用URLを取得"""
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': f'{MUSIC_PATH}/%(id)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
-            # 人間らしいブラウザとして偽装
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
                 'Referer': 'https://www.youtube.com/',
             },
-            # 最新のプレイヤークライアントを使用
             'extractor_args': {
                 'youtube': {
                     'player_client': ['web'],
@@ -51,25 +47,23 @@ class MusicPlayerCog(commands.Cog):
             },
             'nocheckcertificate': True,
             'ignoreerrors': False,
-            'socket_timeout': 30,
-            # 必要に応じてCookieファイルを使う場合はここに記述
-            # 'cookiefile': './cookies.txt',
         }
 
-        # 短時間の連続アクセスを避けるため少し待機
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(1)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+            info = ydl.extract_info(url, download=False)
+            fmt = info['formats'][0] if info.get('formats') else {}
+            stream_url = fmt.get('url') or info.get('url')
             thumb = info.get('thumbnail', '')
             if not thumb and 'thumbnails' in info:
                 thumb = info['thumbnails'].get('high', {}).get('url', '')
             return {
                 'title': info['title'],
-                'path': f"{MUSIC_PATH}/{info['id']}.{info['ext']}",
+                'url': stream_url,
                 'duration': info.get('duration', 0),
-                'url': url,
-                'thumbnail': thumb
+                'thumbnail': thumb,
+                'web_url': url
             }
 
     async def play_next(self, interaction=None):
@@ -88,21 +82,23 @@ class MusicPlayerCog(commands.Cog):
         guild_voice = interaction.guild.voice_client if interaction else None
 
         def after_play(err):
-            if track['path'] and os.path.exists(track['path']):
-                try: os.remove(track['path'])
-                except: pass
             asyncio.run_coroutine_threadsafe(self.play_next(interaction), self.bot.loop)
 
-        if guild_voice:
-            audio = discord.FFmpegPCMAudio(executable=FFMPEG_PATH, source=track['path'])
+        if guild_voice and not guild_voice.is_playing():
+            audio = discord.FFmpegPCMAudio(
+                executable=FFMPEG_PATH,
+                source=track['url'],
+                before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                options="-vn"
+            )
             guild_voice.play(audio, after=after_play)
-            self.current_player = track
+            self.current_title = track['title']
 
             embed = discord.Embed(title="▶️ 再生中", description=f"**{track['title']}**", color=0x2ecc71)
             if track.get('thumbnail'):
                 embed.set_thumbnail(url=track['thumbnail'])
             embed.add_field(name="長さ", value=f"{track['duration']//60}:{track['duration']%60:02d}", inline=True)
-            embed.add_field(name="残り", value=f"{len(self.music_list)}曲", inline=True)
+            embed.add_field(name="待機中", value=f"{len(self.music_list)}曲", inline=True)
 
             if interaction and hasattr(interaction, 'followup'):
                 await interaction.followup.send(embed=embed)
@@ -129,7 +125,7 @@ class MusicPlayerCog(commands.Cog):
                 embed.add_field(name=f"{idx+1}. {snippet['title'][:40]}", value=f"📺 {snippet['channelTitle']}", inline=False)
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
-    # ========== 検索結果選択パネル ==========
+    # ========== 検索結果選択 ==========
     class SearchResultSelect(ui.View):
         def __init__(self, cog, results, parent_view):
             super().__init__(timeout=120)
@@ -153,9 +149,9 @@ class MusicPlayerCog(commands.Cog):
             async def callback(interaction: discord.Interaction):
                 await interaction.response.defer()
                 url = f"https://www.youtube.com/watch?v={video_id}"
-                msg = await interaction.followup.send(f"⬇️ `{title}` をダウンロード中...", ephemeral=True)
+                msg = await interaction.followup.send(f"⬇️ `{title}` 情報取得中...", ephemeral=True)
                 try:
-                    track = await self.cog.download_audio(url)
+                    track = await self.cog.get_stream_url(url)
                     self.cog.music_list.append(track)
                     embed = discord.Embed(title="✅ 追加完了", description=f"**{track['title']}**", color=0x2ecc71)
                     embed.set_thumbnail(url=thumb)
@@ -176,10 +172,8 @@ class MusicPlayerCog(commands.Cog):
 
         def make_panel_embed(self):
             embed = discord.Embed(title="🎵 音楽再生パネル", color=0x3498db)
-            if self.cog.current_player:
-                embed.add_field(name="▶️ 再生中", value=f"**{self.cog.current_player['title']}**", inline=False)
-                if self.cog.current_player.get('thumbnail'):
-                    embed.set_thumbnail(url=self.cog.current_player['thumbnail'])
+            if self.cog.current_title:
+                embed.add_field(name="▶️ 再生中", value=f"**{self.cog.current_title}**", inline=False)
             else:
                 embed.add_field(name="状態", value="停止中", inline=False)
             embed.add_field(name="📋 待機中", value=f"{len(self.cog.music_list)}曲", inline=True)
@@ -195,7 +189,7 @@ class MusicPlayerCog(commands.Cog):
                 return await interaction.response.send_message("❌ あなたの操作ではありません", ephemeral=True)
             await interaction.response.send_modal(MusicPlayerCog.SearchModal(self.cog, self))
 
-        @ui.button(label="📋 内容更新", style=discord.ButtonStyle.secondary, row=0)
+        @ui.button(label="📋 更新", style=discord.ButtonStyle.secondary, row=0)
         async def refresh_btn(self, interaction: discord.Interaction, button: ui.Button):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ 権限なし", ephemeral=True)
@@ -252,7 +246,7 @@ class MusicPlayerCog(commands.Cog):
             await interaction.guild.voice_client.disconnect()
             self.cog.music_list.clear()
             self.cog.is_playing = False
-            self.cog.current_player = None
+            self.cog.current_title = None
             await interaction.response.send_message("⏹ 停止しました", ephemeral=True)
             await self.update_panel()
 
