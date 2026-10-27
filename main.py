@@ -32,13 +32,12 @@ import features.ranking_panel as ranking_panel
 import features.elevator_panel as elevator_panel
 import features.mines_panel as mines_panel
 from core.common import is_owner
-# ===== 音楽プレイヤー用設定 =====
-try:
-    from core.config import Config
-    MUSIC_AVAILABLE = True
-except Exception as e:
-    print(f"⚠️ 音楽設定読み込みエラー: {e}")
-    MUSIC_AVAILABLE = False
+# ===== 音楽プレイヤー設定 =====
+# core/config.py は使わず、直接環境変数から読む
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+MUSIC_AVAILABLE = bool(YOUTUBE_API_KEY)
+if not MUSIC_AVAILABLE:
+    print("⚠️ YOUTUBE_API_KEY 未設定 → 音楽プレイヤーをスキップ")
 # ===== ウェブサーバーインポート =====
 try:
     from web.app import app as flask_app
@@ -105,7 +104,7 @@ intents.members = True
 intents.message_content = True
 intents.guilds = True
 # ============================================================
-# 🔴 メインBot：YWPBot（Cog形式 + 全機能統合）
+# 🔴 メインBot：YWPBot
 # ============================================================
 class YWPBot(commands.Bot):
     def __init__(self):
@@ -114,7 +113,7 @@ class YWPBot(commands.Bot):
     async def setup_hook(self):
         init_db()
         print("🔄 データベース初期化完了")
-        # --- ウェブサーバー起動（バックグラウンド） ---
+        # --- ウェブサーバー起動 ---
         if WEB_AVAILABLE:
             web_thread = threading.Thread(target=run_web_server, daemon=True)
             web_thread.start()
@@ -125,11 +124,11 @@ class YWPBot(commands.Bot):
             "cogs.ywp_commands",
             "cogs.ywp_stages",
             "cogs.ywp_panel",
-            "cogs.auto_loop",  # ✅ 自動周回
+            "cogs.auto_loop",
         ]
-        # ✅ 音楽プレイヤーを追加
+        # ✅ features/music_player を追加
         if MUSIC_AVAILABLE:
-            cogs.append("cogs.music_player")
+            cogs.append("features.music_player")
         for cog in cogs:
             try:
                 await self.load_extension(cog)
@@ -253,7 +252,7 @@ class YWPBot(commands.Bot):
             await inter.response.send_message(embed=em, view=MinesWebStartView())
             await inter.followup.send("✅ パネル設置完了", ephemeral=True)
         print("  ✅ マインスコマンド登録完了")
-        # --- スラッシュコマンド同期 ---
+        # --- コマンド同期 ---
         print("\n🔁 スラッシュコマンド同期中...")
         synced = await tree.sync()
         print(f"✅ 同期完了！合計 {len(synced)} 件")
