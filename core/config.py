@@ -22,7 +22,7 @@ class Config:
         """必須設定が揃っているか確認"""
         missing = []
         if not cls.DISCORD_TOKEN:
-            missing.append("DISCORD_BOT_TOKEN")
+            missing.append("DISCORD_TOKEN")
         if not cls.YOUTUBE_API_KEY:
             missing.append("YOUTUBE_API_KEY")
         
