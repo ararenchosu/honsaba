@@ -30,6 +30,23 @@ def extract_playlist_id(url):
     m = PLAYLIST_ID_PATTERN.search(url.strip())
     return m.group(1) if m else None
 
+def get_error_reason(err_msg):
+    """エラーメッセージから分かりやすい理由に変換"""
+    err = str(err_msg).lower()
+    if 'sign in' in err or 'bot' in err:
+        return "⚠️ YouTubeのBot判定に引っかかりました。Cookieを更新してください。"
+    if 'age' in err or 'age-restricted' in err:
+        return "🔞 年齢制限付き動画のため再生できません。"
+    if 'not available' in err or 'unavailable' in err or 'private' in err:
+        return "🚫 この動画は非公開・削除・地域制限で再生できません。"
+    if 'copyright' in err or 'blocked' in err:
+        return "©️ 著作権の問題でこの動画は再生できません。"
+    if 'format' in err or 'requested format' in err:
+        return "🎵 この動画は音声フォーマットが取得できません。別の動画をお試しください。"
+    if 'live' in err:
+        return "📡 ライブ配信中の動画は再生できない場合があります。"
+    return f"❌ 再生できませんでした: {str(err_msg)[:80]}"
+
 
 class MusicPlayerCog(commands.Cog):
     def __init__(self, bot):
@@ -47,9 +64,10 @@ class MusicPlayerCog(commands.Cog):
 
     async def get_stream_url(self, url):
         ydl_opts = {
-            'format': 'bestaudio/best',
+            'format': 'bestaudio/best[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
             'quiet': True,
             'no_warnings': True,
+            'ignoreerrors': False,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
                 'Referer': 'https://www.youtube.com/',
@@ -64,13 +82,36 @@ class MusicPlayerCog(commands.Cog):
         await asyncio.sleep(1.5)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            stream_url = info.get('url') or (info['formats'][0].get('url') if info.get('formats') else None)
-            thumb = info.get('thumbnail') or (info['thumbnails'].get('high', {}).get('url') if info.get('thumbnails') else '')
+            
+            # 複数候補から確実にストリームURLを取得
+            stream_url = None
+            if info.get('url'):
+                stream_url = info['url']
+            elif info.get('formats'):
+                audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
+                if audio_formats:
+                    stream_url = audio_formats[0].get('url') or audio_formats[0].get('manifest_url')
+                if not stream_url:
+                    all_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
+                    if all_formats:
+                        stream_url = all_formats[0].get('url') or all_formats[0].get('manifest_url')
+            
+            if not stream_url:
+                raise Exception("有効な音声フォーマットが見つかりません")
+            
+            thumb = info.get('thumbnail')
+            if not thumb and info.get('thumbnails'):
+                thumbs = info['thumbnails']
+                if isinstance(thumbs, list):
+                    thumb = thumbs[-1].get('url') if thumbs else None
+                elif isinstance(thumbs, dict):
+                    thumb = thumbs.get('high', {}).get('url') or thumbs.get('default', {}).get('url')
+            
             return {
                 'title': info['title'],
                 'url': stream_url,
                 'duration': info.get('duration', 0),
-                'thumbnail': thumb,
+                'thumbnail': thumb or '',
                 'video_id': info.get('id', '')
             }
 
@@ -148,23 +189,26 @@ class MusicPlayerCog(commands.Cog):
                     try:
                         entries = await self.cog.get_playlist_tracks(pid)
                         if not entries:
-                            return await msg.edit(content="❌ プレイリストが空または取得不可")
+                            return await msg.edit(content="❌ プレイリストが空または取得不可です")
                         added = 0
+                        failed = []
                         for entry in entries:
                             try:
                                 trk = await self.cog.get_stream_url(f"https://www.youtube.com/watch?v={entry['id']}")
                                 self.cog.music_list.append(trk)
                                 added += 1
                                 await asyncio.sleep(0.5)
-                            except Exception:
+                            except Exception as e:
+                                failed.append(f"{entry['title'][:20]}: {get_error_reason(e)}")
                                 continue
                         emb = discord.Embed(title="✅ プレイリスト追加完了", color=0x2ecc71)
-                        emb.add_field(name="追加", value=f"{added}/{len(entries)}曲", inline=True)
-                        emb.add_field(name="再生リスト合計", value=f"計 {len(self.cog.music_list)}曲", inline=True)
+                        emb.add_field(name="追加成功", value=f"{added}/{len(entries)}曲", inline=True)
+                        if failed:
+                            emb.add_field(name="⚠️ 再生できなかった曲", value="\n".join(failed[:5]), inline=False)
                         await msg.edit(content="", embed=emb)
                         await self.parent_view.update_panel()
                     except Exception as e:
-                        await msg.edit(content=f"❌ 失敗: `{str(e)[:150]}`")
+                        await msg.edit(content=get_error_reason(e))
                     return
 
                 # 動画ID
@@ -181,7 +225,7 @@ class MusicPlayerCog(commands.Cog):
                         await msg.edit(content="", embed=emb)
                         await self.parent_view.update_panel()
                     except Exception as e:
-                        await msg.edit(content=f"❌ 失敗: `{str(e)[:150]}`")
+                        await msg.edit(content=get_error_reason(e))
                     return
 
                 return await interaction.followup.send(
@@ -226,7 +270,7 @@ class MusicPlayerCog(commands.Cog):
                     await msg.edit(content="", embed=emb)
                     await self.parent_view.update_panel()
                 except Exception as e:
-                    await msg.edit(content=f"❌ 失敗: `{str(e)[:150]}`")
+                    await msg.edit(content=get_error_reason(e))
             return cb
 
     class MusicPanel(ui.View):
