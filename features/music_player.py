@@ -339,7 +339,7 @@ class MusicPlayerCog(commands.Cog):
                     await interaction.user.voice.channel.connect()
                 else:
                     return await interaction.response.send_message("❌ 先にボイスチャンネルに入ってください", ephemeral=True)
-                            @ui.button(label="▶️ 再生", style=discord.ButtonStyle.success, row=1)
+                                    @ui.button(label="▶️ 再生", style=discord.ButtonStyle.success, row=1)
         async def play_btn(self, interaction: discord.Interaction, button: ui.Button):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ 権限なし", ephemeral=True)
