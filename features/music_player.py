@@ -12,6 +12,7 @@ MUSIC_PATH = os.getenv("MUSIC_PATH", "./music")
 
 os.makedirs(MUSIC_PATH, exist_ok=True)
 
+
 class MusicPlayerCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -91,12 +92,13 @@ class MusicPlayerCog(commands.Cog):
             super().__init__()
             self.cog = cog
             self.parent_view = parent_view
+
         async def on_submit(self, interaction: discord.Interaction):
             await interaction.response.defer()
             results = await self.cog.youtube_search(str(self.keyword))
             if not results:
                 return await interaction.followup.send("❌ 見つかりませんでした", ephemeral=True)
-            view = self.cog.SearchResultSelect(self.cog, results, self.parent_view)
+            view = MusicPlayerCog.SearchResultSelect(self.cog, results, self.parent_view)
             embed = discord.Embed(title=f"🔍 「{self.keyword}」 検索結果", color=0x3498db)
             for idx, item in enumerate(results):
                 snippet = item['snippet']
@@ -110,15 +112,22 @@ class MusicPlayerCog(commands.Cog):
             self.cog = cog
             self.results = results
             self.parent_view = parent_view
+            # ボタンを動的に生成
             for idx, item in enumerate(results):
                 snippet = item['snippet']
                 video_id = item['id']['videoId']
                 title = snippet['title'][:35]
                 thumb = snippet['thumbnails']['high']['url']
-                btn = ui.Button(label=f"{idx+1}. {title}", style=discord.ButtonStyle.primary)
-                btn.callback = self.make_callback(video_id, title, thumb)
+                btn = ui.Button(
+                    label=f"{idx+1}. {title}",
+                    style=discord.ButtonStyle.primary,
+                    custom_id=f"add_{video_id}"
+                )
+                # callbackを直接設定 → この書き方でエラーが出ない
+                btn.callback = self._make_callback(video_id, title, thumb)
                 self.add_item(btn)
-        def make_callback(self, video_id, title, thumb):
+
+        def _make_callback(self, video_id, title, thumb):
             async def callback(interaction: discord.Interaction):
                 await interaction.response.defer()
                 url = f"https://www.youtube.com/watch?v={video_id}"
@@ -142,6 +151,7 @@ class MusicPlayerCog(commands.Cog):
             self.cog = cog
             self.author = author
             self.message = None
+
         def make_panel_embed(self):
             embed = discord.Embed(title="🎵 音楽再生パネル", color=0x3498db)
             if self.cog.current_player:
@@ -152,22 +162,26 @@ class MusicPlayerCog(commands.Cog):
                 embed.add_field(name="状態", value="停止中", inline=False)
             embed.add_field(name="📋 待機中", value=f"{len(self.cog.music_list)}曲", inline=True)
             return embed
+
         async def update_panel(self):
             if self.message:
                 await self.message.edit(embed=self.make_panel_embed())
-        @ui.Button(label="🔍 曲を検索", style=discord.ButtonStyle.blurple, row=0)
+
+        @ui.button(label="🔍 曲を検索", style=discord.ButtonStyle.blurple, row=0)
         async def search_btn(self, interaction: discord.Interaction, button: ui.Button):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ あなたの操作ではありません", ephemeral=True)
             await interaction.response.send_modal(MusicPlayerCog.SearchModal(self.cog, self))
-        @ui.Button(label="📋 内容更新", style=discord.ButtonStyle.secondary, row=0)
+
+        @ui.button(label="📋 内容更新", style=discord.ButtonStyle.secondary, row=0)
         async def refresh_btn(self, interaction: discord.Interaction, button: ui.Button):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ 権限なし", ephemeral=True)
             await interaction.response.defer(ephemeral=True)
             await self.update_panel()
             await interaction.followup.send("✅ 更新しました", ephemeral=True)
-        @ui.Button(label="▶️ 再生", style=discord.ButtonStyle.success, row=1)
+
+        @ui.button(label="▶️ 再生", style=discord.ButtonStyle.success, row=1)
         async def play_btn(self, interaction: discord.Interaction, button: ui.Button):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ 権限なし", ephemeral=True)
@@ -182,21 +196,24 @@ class MusicPlayerCog(commands.Cog):
                 await self.update_panel()
             else:
                 await interaction.response.send_message("❌ 再生する曲がありません", ephemeral=True)
-        @ui.Button(label="⏸ 一時停止", style=discord.ButtonStyle.secondary, row=1)
+
+        @ui.button(label="⏸ 一時停止", style=discord.ButtonStyle.secondary, row=1)
         async def pause_btn(self, interaction: discord.Interaction, button: ui.Button):
             if interaction.user.id != self.author.id or not interaction.guild.voice_client:
                 return
             if interaction.guild.voice_client.is_playing():
                 interaction.guild.voice_client.pause()
                 await interaction.response.send_message("⏸ 一時停止", ephemeral=True)
-        @ui.Button(label="⏯ 再開", style=discord.ButtonStyle.secondary, row=2)
+
+        @ui.button(label="⏯ 再開", style=discord.ButtonStyle.secondary, row=2)
         async def resume_btn(self, interaction: discord.Interaction, button: ui.Button):
             if interaction.user.id != self.author.id or not interaction.guild.voice_client:
                 return
             if interaction.guild.voice_client.is_paused():
                 interaction.guild.voice_client.resume()
                 await interaction.response.send_message("⏯ 再開", ephemeral=True)
-        @ui.Button(label="⏭ スキップ", style=discord.ButtonStyle.primary, row=2)
+
+        @ui.button(label="⏭ スキップ", style=discord.ButtonStyle.primary, row=2)
         async def skip_btn(self, interaction: discord.Interaction, button: ui.Button):
             if interaction.user.id != self.author.id or not interaction.guild.voice_client:
                 return
@@ -204,7 +221,8 @@ class MusicPlayerCog(commands.Cog):
                 interaction.guild.voice_client.stop()
                 await interaction.response.send_message("⏭ スキップしました", ephemeral=True)
                 await self.update_panel()
-        @ui.Button(label="⏹ 停止/切断", style=discord.ButtonStyle.danger, row=2)
+
+        @ui.button(label="⏹ 停止/切断", style=discord.ButtonStyle.danger, row=2)
         async def stop_btn(self, interaction: discord.Interaction, button: ui.Button):
             if interaction.user.id != self.author.id or not interaction.guild.voice_client:
                 return
