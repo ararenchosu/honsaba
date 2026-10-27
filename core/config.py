@@ -6,7 +6,7 @@ load_dotenv()
 
 class Config:
     # Discord
-    DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+    DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
     
     # YouTube
     YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
