@@ -1,4 +1,3 @@
-import asyncio
 import os
 import discord
 import yt_dlp
@@ -6,16 +5,12 @@ from discord import app_commands, ui
 from discord.ext import commands
 from googleapiclient.discovery import build
 
-# 設定を環境変数から直接取得
-def get_env(name, default=None):
-    return os.getenv(name, default)
-
-YOUTUBE_API_KEY = get_env("YOUTUBE_API_KEY")
-FFMPEG_PATH = get_env("FFMPEG_Path", "ffmpeg")
-MUSIC_PATH = get_env("MUSIC_PATH", "./music")
+# ===== 環境変数から直接取得 =====
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+FFMPEG_PATH = os.getenv("FFMPEG_Path", "ffmpeg")
+MUSIC_PATH = os.getenv("MUSIC_PATH", "./music")
 
 os.makedirs(MUSIC_PATH, exist_ok=True)
-
 
 class MusicPlayerCog(commands.Cog):
     def __init__(self, bot):
