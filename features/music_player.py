@@ -240,44 +240,65 @@ class MusicPlayerCog(commands.Cog):
         except:
             pass
 
-    # ========== 検索モーダル ==========
+    # ========== 検索モーダル（結果を表示して選択） ==========
     class SearchModal(ui.Modal, title="🔍 曲を検索"):
         keyword = ui.TextInput(label="検索キーワード", placeholder="曲名・アーティスト名", max_length=200)
         def __init__(self, cog):
             super().__init__()
             self.cog = cog
+
         async def on_submit(self, interaction: discord.Interaction):
             await interaction.response.defer(ephemeral=True)
             txt = str(self.keyword).strip()
-            results = await self.cog.youtube_search(txt, max_results=10)
+            results = await self.cog.youtube_search(txt, max_results=5)
+            
             if not results:
                 return await interaction.followup.send("❌ 見つかりませんでした", ephemeral=True)
             
-            state = self.cog.get_state(interaction.guild_id)
-            added = 0
-            failed = []
-            msg = await interaction.followup.send(f"⬇️ {len(results)}曲を追加中...", ephemeral=True)
+            # 検索結果をembedで表示
+            emb = discord.Embed(title=f"🔍 「{txt}」 検索結果", color=0x3498db)
+            for i, item in enumerate(results):
+                title = item['snippet']['title'][:40]
+                channel = item['snippet']['channelTitle']
+                emb.add_field(name=f"{i+1}. {title}", value=f"📺 {channel}", inline=False)
             
-            for item in results:
+            # 選択ボタンを表示
+            view = MusicPlayerCog.SearchResultSelect(self.cog, results)
+            await interaction.followup.send(embed=emb, view=view, ephemeral=True)
+
+    # ========== 検索結果選択ビュー ==========
+    class SearchResultSelect(ui.View):
+        def __init__(self, cog, results):
+            super().__init__(timeout=120)
+            self.cog = cog
+            self.results = results
+            for i, item in enumerate(results):
                 vid = item['id']['videoId']
+                title = item['snippet']['title'][:30]
+                btn = ui.Button(label=f"{i+1}. {title}", style=discord.ButtonStyle.primary)
+                btn.callback = self._make_cb(vid, item['snippet']['thumbnails']['high']['url'])
+                self.add_item(btn)
+
+        def _make_cb(self, vid, thumb):
+            async def cb(interaction: discord.Interaction):
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("⬇️ 情報取得中...", ephemeral=True)
+                state = self.cog.get_state(interaction.guild_id)
                 try:
                     trk = await self.cog.get_stream_url(f"https://www.youtube.com/watch?v={vid}")
                     state.queue.append(trk)
-                    added += 1
-                    await asyncio.sleep(0.5)
+                    emb = discord.Embed(title="✅ 追加完了", description=f"**{trk['title']}**", color=0x2ecc71)
+                    emb.set_thumbnail(url=thumb)
+                    emb.add_field(name="キュー", value=f"計 {len(state.queue)}曲", inline=True)
+                    await msg.edit(content="", embed=emb)
+                    
+                    # 自動再生開始
+                    vc = interaction.guild.voice_client
+                    if vc and not state.is_playing and state.queue:
+                        await self.cog.play_next(interaction.guild_id, vc, interaction.channel)
                 except Exception as e:
-                    failed.append(f"{item['snippet']['title'][:20]}: {get_error_reason(e)}")
-            
-            emb = discord.Embed(title="✅ 追加完了", color=0x2ecc71)
-            emb.add_field(name="追加", value=f"{added}/{len(results)}曲", inline=True)
-            if failed:
-                emb.add_field(name="⚠️ 再生不可", value="\n".join(failed[:3]), inline=False)
-            await msg.edit(content="", embed=emb)
-            
-            # 自動再生開始
-            vc = interaction.guild.voice_client
-            if vc and not state.is_playing and state.queue:
-                await self.cog.play_next(interaction.guild_id, vc, interaction.channel)
+                    await msg.edit(content=get_error_reason(e))
+            return cb
 
     # ========== リンク検索モーダル ==========
     class LinkModal(ui.Modal, title="🔗 リンクを追加"):
