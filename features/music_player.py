@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 import discord
 from discord import app_commands, ui
@@ -13,6 +14,34 @@ MUSIC_PATH = os.getenv("MUSIC_PATH", "./music")
 
 os.makedirs(MUSIC_PATH, exist_ok=True)
 
+# YouTube URL/プレイリストからID抽出
+YOUTUBE_PATTERNS = [
+    re.compile(r'(?:https?://)?(?:www\.)?youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})'),
+    re.compile(r'(?:https?://)?youtu\.be/([a-zA-Z0-9_-]{11})'),
+    re.compile(r'(?:https?://)?(?:www\.)?youtube\.com/embed/([a-zA-Z0-9_-]{11})'),
+    re.compile(r'(?:https?://)?music\.youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})'),
+]
+YOUTUBE_PLAYLIST_PATTERNS = [
+    re.compile(r'(?:https?://)?(?:www\.)?youtube\.com/playlist\?list=([a-zA-Z0-9_-]{34})'),
+    re.compile(r'(?:https?://)?(?:www\.)?youtube\.com/watch\?.*list=([a-zA-Z0-9_-]{34})'),
+]
+
+def extract_video_id(url):
+    url = url.strip()
+    for pattern in YOUTUBE_PATTERNS:
+        match = pattern.search(url)
+        if match:
+            return match.group(1)
+    return None
+
+def extract_playlist_id(url):
+    url = url.strip()
+    for pattern in YOUTUBE_PLAYLIST_PATTERNS:
+        match = pattern.search(url)
+        if match:
+            return match.group(1)
+    return None
+
 
 class MusicPlayerCog(commands.Cog):
     def __init__(self, bot):
@@ -20,6 +49,10 @@ class MusicPlayerCog(commands.Cog):
         self.music_list = []
         self.current_title = None
         self.is_playing = False
+        # Cookieファイルのパス
+        self.COOKIE_FILE = os.path.join(os.path.dirname(__file__), '..', 'cookies.txt')
+        self.use_cookie = os.path.exists(self.COOKIE_FILE)
+        print(f"🍪 Cookieファイル: {'有効' if self.use_cookie else 'なし'} → {self.COOKIE_FILE}")
 
     async def youtube_search(self, query):
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
@@ -30,14 +63,15 @@ class MusicPlayerCog(commands.Cog):
         return response.get('items', [])
 
     async def get_stream_url(self, url):
-        """ダウンロードせずに直接再生用URLを取得"""
+        """ストリーミングURL取得（Cookie対応版）"""
         ydl_opts = {
             'format': 'bestaudio/best',
             'quiet': True,
             'no_warnings': True,
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
                 'Referer': 'https://www.youtube.com/',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
             },
             'extractor_args': {
                 'youtube': {
@@ -47,24 +81,59 @@ class MusicPlayerCog(commands.Cog):
             },
             'nocheckcertificate': True,
             'ignoreerrors': False,
+            'socket_timeout': 30,
         }
 
-        await asyncio.sleep(1)
+        if self.use_cookie:
+            ydl_opts['cookiefile'] = self.COOKIE_FILE
+
+        await asyncio.sleep(1.5)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            fmt = info['formats'][0] if info.get('formats') else {}
-            stream_url = fmt.get('url') or info.get('url')
+            stream_url = info.get('url')
+            if not stream_url and info.get('formats'):
+                stream_url = info['formats'][0].get('url')
             thumb = info.get('thumbnail', '')
-            if not thumb and 'thumbnails' in info:
+            if not thumb and info.get('thumbnails'):
                 thumb = info['thumbnails'].get('high', {}).get('url', '')
             return {
                 'title': info['title'],
                 'url': stream_url,
                 'duration': info.get('duration', 0),
                 'thumbnail': thumb,
-                'web_url': url
+                'video_id': info.get('id', '')
             }
+
+    async def get_playlist_tracks(self, playlist_id):
+        """プレイリスト内の動画を一括取得"""
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+                'Referer': 'https://www.youtube.com/',
+            },
+            'nocheckcertificate': True,
+            'ignoreerrors': True,
+        }
+        if self.use_cookie:
+            ydl_opts['cookiefile'] = self.COOKIE_FILE
+
+        playlist_url = f"https://www.youtube.com/playlist?list={playlist_id}"
+        tracks = []
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(playlist_url, download=False)
+            if 'entries' in info:
+                for entry in info['entries']:
+                    if entry and entry.get('id'):
+                        tracks.append({
+                            'id': entry['id'],
+                            'title': entry.get('title', '不明')
+                        })
+        return tracks
 
     async def play_next(self, interaction=None):
         if not self.music_list:
@@ -105,21 +174,75 @@ class MusicPlayerCog(commands.Cog):
             elif interaction:
                 await interaction.send(embed=embed)
 
-    # ========== 検索モーダル ==========
-    class SearchModal(ui.Modal, title="🎵 曲を検索"):
-        keyword = ui.TextInput(label="検索キーワード", placeholder="曲名・アーティスト名", max_length=100)
+    # ========== 検索モーダル（URL/プレイリスト対応） ==========
+    class SearchModal(ui.Modal, title="🎵 曲を検索 / URLを追加"):
+        keyword = ui.TextInput(
+            label="検索キーワード または YouTubeリンク",
+            placeholder="曲名・アーティスト名 / 動画URL / プレイリストURL",
+            max_length=500
+        )
         def __init__(self, cog, parent_view):
             super().__init__()
             self.cog = cog
             self.parent_view = parent_view
 
         async def on_submit(self, interaction: discord.Interaction):
-            await interaction.response.defer()
-            results = await self.cog.youtube_search(str(self.keyword))
+            await interaction.response.defer(ephemeral=True)
+            input_text = str(self.keyword).strip()
+
+            # --- プレイリストURL判定 ---
+            playlist_id = extract_playlist_id(input_text)
+            if playlist_id:
+                msg = await interaction.followup.send(f"📋 プレイリスト取得中...", ephemeral=True)
+                try:
+                    entries = await self.cog.get_playlist_tracks(playlist_id)
+                    if not entries:
+                        return await msg.edit(content="❌ プレイリストが見つからない、または空です")
+                    
+                    added = 0
+                    for entry in entries:
+                        full_url = f"https://www.youtube.com/watch?v={entry['id']}"
+                        try:
+                            track = await self.cog.get_stream_url(full_url)
+                            self.cog.music_list.append(track)
+                            added += 1
+                            await asyncio.sleep(0.5)
+                        except Exception:
+                            continue
+                    
+                    embed = discord.Embed(title="✅ プレイリスト追加完了", color=0x2ecc71)
+                    embed.add_field(name="追加した曲数", value=f"{added} / {len(entries)}曲", inline=True)
+                    embed.add_field(name="再生リスト合計", value=f"計 {len(self.cog.music_list)}曲", inline=True)
+                    await msg.edit(content="", embed=embed)
+                    await self.parent_view.update_panel()
+                except Exception as e:
+                    await msg.edit(content=f"❌ プレイリスト取得失敗: `{str(e)[:150]}`")
+                return
+
+            # --- 動画URL判定 ---
+            video_id = extract_video_id(input_text)
+            if video_id:
+                full_url = f"https://www.youtube.com/watch?v={video_id}"
+                msg = await interaction.followup.send(f"⬇️ 情報取得中...", ephemeral=True)
+                try:
+                    track = await self.cog.get_stream_url(full_url)
+                    self.cog.music_list.append(track)
+                    embed = discord.Embed(title="✅ 追加完了", description=f"**{track['title']}**", color=0x2ecc71)
+                    if track.get('thumbnail'):
+                        embed.set_thumbnail(url=track['thumbnail'])
+                    embed.add_field(name="再生リスト", value=f"計 {len(self.cog.music_list)}曲", inline=True)
+                    await msg.edit(content="", embed=embed)
+                    await self.parent_view.update_panel()
+                except Exception as e:
+                    await msg.edit(content=f"❌ 追加失敗: `{str(e)[:150]}`")
+                return
+
+            # --- 通常検索 ---
+            results = await self.cog.youtube_search(input_text)
             if not results:
                 return await interaction.followup.send("❌ 見つかりませんでした", ephemeral=True)
             view = MusicPlayerCog.SearchResultSelect(self.cog, results, self.parent_view)
-            embed = discord.Embed(title=f"🔍 「{self.keyword}」 検索結果", color=0x3498db)
+            embed = discord.Embed(title=f"🔍 「{input_text}」 検索結果", color=0x3498db)
             for idx, item in enumerate(results):
                 snippet = item['snippet']
                 embed.add_field(name=f"{idx+1}. {snippet['title'][:40]}", value=f"📺 {snippet['channelTitle']}", inline=False)
@@ -176,7 +299,17 @@ class MusicPlayerCog(commands.Cog):
                 embed.add_field(name="▶️ 再生中", value=f"**{self.cog.current_title}**", inline=False)
             else:
                 embed.add_field(name="状態", value="停止中", inline=False)
-            embed.add_field(name="📋 待機中", value=f"{len(self.cog.music_list)}曲", inline=True)
+            cookie_status = "🍪 有効" if self.cog.use_cookie else "⚠️ なし"
+            embed.add_field(
+                name="📋 待機中",
+                value=f"{len(self.cog.music_list)}曲\nCookie: {cookie_status}",
+                inline=True
+            )
+            embed.add_field(
+                name="💡 使い方",
+                value="🔍 曲を検索にリンクを入れても曲検索かかります。YouTubeのみ対応です。",
+                inline=False
+            )
             return embed
 
         async def update_panel(self):
@@ -206,8 +339,17 @@ class MusicPlayerCog(commands.Cog):
                     await interaction.user.voice.channel.connect()
                 else:
                     return await interaction.response.send_message("❌ 先にボイスチャンネルに入ってください", ephemeral=True)
+                            @ui.button(label="▶️ 再生", style=discord.ButtonStyle.success, row=1)
+        async def play_btn(self, interaction: discord.Interaction, button: ui.Button):
+            if interaction.user.id != self.author.id:
+                return await interaction.response.send_message("❌ 権限なし", ephemeral=True)
+            if not interaction.guild.voice_client:
+                if interaction.user.voice:
+                    await interaction.user.voice.channel.connect()
+                else:
+                    return await interaction.response.send_message("❌ 先にボイスチャンネルに入ってください", ephemeral=True)
             if not self.cog.is_playing and self.cog.music_list:
-                await interaction.response.defer()
+                await interaction.response.defer(ephemeral=True)
                 await self.cog.play_next(interaction)
                 await self.update_panel()
             else:
@@ -233,10 +375,12 @@ class MusicPlayerCog(commands.Cog):
         async def skip_btn(self, interaction: discord.Interaction, button: ui.Button):
             if interaction.user.id != self.author.id or not interaction.guild.voice_client:
                 return
-            if interaction.guild.voice_client.is_playing():
+            if interaction.guild.voice_client.is_playing() or self.cog.music_list:
                 interaction.guild.voice_client.stop()
                 await interaction.response.send_message("⏭ スキップしました", ephemeral=True)
                 await self.update_panel()
+            else:
+                await interaction.response.send_message("❌ スキップする曲がありません", ephemeral=True)
 
         @ui.button(label="⏹ 停止/切断", style=discord.ButtonStyle.danger, row=2)
         async def stop_btn(self, interaction: discord.Interaction, button: ui.Button):
